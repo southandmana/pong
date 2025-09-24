@@ -8,6 +8,7 @@ interface GameState {
   ballY: number;
   ballVelX: number;
   ballVelY: number;
+  prevBallX: number;
   leftPaddleY: number;
   rightPaddleY: number;
   leftHealth: number;
@@ -36,6 +37,7 @@ const PongGame: React.FC = () => {
     ballY: 300,
     ballVelX: BASE_BALL_SPEED,
     ballVelY: 3,
+    prevBallX: 400,
     leftPaddleY: 250,
     rightPaddleY: 250,
     leftHealth: 100,
@@ -140,7 +142,7 @@ const PongGame: React.FC = () => {
       // Ball approaching AI - update target every 4 frames for accuracy
       if (aiState.frameCounter % 4 === 0) {
         const ballCenterY = state.ballY + BALL_SIZE / 2;
-        const targetOffset = (Math.random() - 0.5) * 20; // Reduced error: ±10px
+        const targetOffset = (Math.random() - 0.5) * 30; // Increased error: ±15px
         aiState.targetY = ballCenterY + targetOffset;
       }
     }
@@ -170,6 +172,9 @@ const PongGame: React.FC = () => {
       }
     }
 
+    // Store previous position before updating
+    state.prevBallX = state.ballX;
+
     // Update ball position (apply speed multiplier)
     state.ballX += state.ballVelX * state.currentSpeedMultiplier;
     state.ballY += state.ballVelY * state.currentSpeedMultiplier;
@@ -180,13 +185,16 @@ const PongGame: React.FC = () => {
       soundRef.current?.wallBounce();
     }
 
-    // Ball collision with left paddle
-    if (state.ballX <= PADDLE_WIDTH &&
+    // Ball collision with left paddle (swept collision detection)
+    if (state.prevBallX > PADDLE_WIDTH && state.ballX <= PADDLE_WIDTH &&
         state.ballY >= state.leftPaddleY &&
         state.ballY <= state.leftPaddleY + PADDLE_HEIGHT) {
       state.ballVelX = -state.ballVelX;
       const hitPos = (state.ballY - state.leftPaddleY) / PADDLE_HEIGHT;
       state.ballVelY = (hitPos - 0.5) * 8;
+
+      // Move ball to paddle boundary to prevent sticking
+      state.ballX = PADDLE_WIDTH + 1;
 
       // Increase speed by 10% on paddle hit
       state.currentSpeedMultiplier *= 1.1;
@@ -194,13 +202,17 @@ const PongGame: React.FC = () => {
       soundRef.current?.paddleHit();
     }
 
-    // Ball collision with right paddle
-    if (state.ballX >= CANVAS_WIDTH - PADDLE_WIDTH - BALL_SIZE &&
+    // Ball collision with right paddle (swept collision detection)
+    const rightPaddleLeft = CANVAS_WIDTH - PADDLE_WIDTH;
+    if (state.prevBallX < rightPaddleLeft - BALL_SIZE && state.ballX >= rightPaddleLeft - BALL_SIZE &&
         state.ballY >= state.rightPaddleY &&
         state.ballY <= state.rightPaddleY + PADDLE_HEIGHT) {
       state.ballVelX = -state.ballVelX;
       const hitPos = (state.ballY - state.rightPaddleY) / PADDLE_HEIGHT;
       state.ballVelY = (hitPos - 0.5) * 8;
+
+      // Move ball to paddle boundary to prevent sticking
+      state.ballX = rightPaddleLeft - BALL_SIZE - 1;
 
       // Increase speed by 10% on paddle hit
       state.currentSpeedMultiplier *= 1.1;
@@ -228,6 +240,7 @@ const PongGame: React.FC = () => {
 
       state.ballX = CANVAS_WIDTH / 2;
       state.ballY = CANVAS_HEIGHT / 2;
+      state.prevBallX = CANVAS_WIDTH / 2;
       state.ballVelX = BASE_BALL_SPEED;
       state.ballVelY = (Math.random() - 0.5) * 6;
       soundRef.current?.score();
@@ -251,6 +264,7 @@ const PongGame: React.FC = () => {
 
       state.ballX = CANVAS_WIDTH / 2;
       state.ballY = CANVAS_HEIGHT / 2;
+      state.prevBallX = CANVAS_WIDTH / 2;
       state.ballVelX = -BASE_BALL_SPEED;
       state.ballVelY = (Math.random() - 0.5) * 6;
       soundRef.current?.score();
@@ -296,6 +310,7 @@ const PongGame: React.FC = () => {
       ballY: CANVAS_HEIGHT / 2,
       ballVelX: BASE_BALL_SPEED,
       ballVelY: 3,
+      prevBallX: CANVAS_WIDTH / 2,
       leftPaddleY: 250,
       rightPaddleY: 250,
       leftHealth: 100,
