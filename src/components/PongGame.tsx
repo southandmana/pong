@@ -61,6 +61,25 @@ const PongGame: React.FC = () => {
     isBlinkVisible: true,
   });
 
+  // CPU paddle pixel system (10 wide x 100 tall = 1000 pixels)
+  const cpuPaddlePixelsRef = useRef<number[][]>([]);
+
+  // Initialize CPU paddle pixels
+  const initializeCpuPaddle = () => {
+    const pixels: number[][] = [];
+    for (let x = 0; x < PADDLE_WIDTH; x++) {
+      pixels[x] = [];
+      for (let y = 0; y < PADDLE_HEIGHT; y++) {
+        pixels[x][y] = 1.0; // 1.0 = fully solid, 0.0 = destroyed
+      }
+    }
+    return pixels;
+  };
+
+  // Bullet system
+  const bulletsRef = useRef<{x: number, y: number, vx: number, vy: number}[]>([]);
+  const lastShotTimeRef = useRef(0);
+
   // Only use useState for UI-reactive values
   const [isRunning, setIsRunning] = useState(false);
   const [leftHealth, setLeftHealth] = useState(100);
@@ -108,22 +127,49 @@ const PongGame: React.FC = () => {
     ctx.setLineDash([]);
 
     // Draw paddles with terminal green
-    ctx.fillStyle = '#00ff00';
-
     const animState = animationStateRef.current;
 
-    // Draw left paddle (only if not blinking or if blink is visible)
+    // Draw left paddle (solid rectangle, only if not blinking or if blink is visible)
     if (animState.blinkingPaddle !== 'left' || animState.isBlinkVisible) {
+      ctx.fillStyle = '#00ff00';
       ctx.fillRect(0, state.leftPaddleY, PADDLE_WIDTH, PADDLE_HEIGHT);
     }
 
-    // Draw right paddle (only if not blinking or if blink is visible)
+    // Draw right paddle (pixel by pixel, only if not blinking or if blink is visible)
     if (animState.blinkingPaddle !== 'right' || animState.isBlinkVisible) {
-      ctx.fillRect(CANVAS_WIDTH - PADDLE_WIDTH, state.rightPaddleY, PADDLE_WIDTH, PADDLE_HEIGHT);
+      const cpuPixels = cpuPaddlePixelsRef.current;
+      const paddleX = CANVAS_WIDTH - PADDLE_WIDTH;
+
+      // Ensure pixels are initialized
+      if (cpuPixels.length === 0) {
+        cpuPaddlePixelsRef.current = initializeCpuPaddle();
+      }
+
+      for (let x = 0; x < PADDLE_WIDTH; x++) {
+        for (let y = 0; y < PADDLE_HEIGHT; y++) {
+          const pixelHealth = cpuPixels[x]?.[y];
+          if (pixelHealth && pixelHealth > 0) {
+            // Set opacity based on pixel health
+            ctx.globalAlpha = pixelHealth;
+            ctx.fillStyle = '#00ff00';
+            ctx.fillRect(paddleX + x, state.rightPaddleY + y, 1, 1);
+          }
+        }
+      }
+      ctx.globalAlpha = 1.0; // Reset alpha
     }
 
     // Draw ball with terminal green
+    ctx.fillStyle = '#00ff00';
     ctx.fillRect(state.ballX, state.ballY, BALL_SIZE, BALL_SIZE);
+
+    // Draw bullets
+    ctx.fillStyle = '#ffff00'; // Yellow bullets for contrast
+    const bullets = bulletsRef.current;
+    for (let i = 0; i < bullets.length; i++) {
+      const bullet = bullets[i];
+      ctx.fillRect(bullet.x, bullet.y, BALL_SIZE, BALL_SIZE); // Same size as ball (10x10)
+    }
 
   }, []);
 
@@ -162,6 +208,72 @@ const PongGame: React.FC = () => {
 
       // If blinking, skip normal ball movement
       return;
+    }
+
+    // Update bullets
+    const bullets = bulletsRef.current;
+    let cpuPixels = cpuPaddlePixelsRef.current;
+
+    // Ensure pixels are initialized
+    if (cpuPixels.length === 0) {
+      cpuPixels = cpuPaddlePixelsRef.current = initializeCpuPaddle();
+    }
+
+    const paddleX = CANVAS_WIDTH - PADDLE_WIDTH;
+
+    for (let i = bullets.length - 1; i >= 0; i--) {
+      const bullet = bullets[i];
+
+      // Move bullet
+      bullet.x += bullet.vx;
+      bullet.y += bullet.vy;
+
+      // Remove bullets that go off screen
+      if (bullet.x > CANVAS_WIDTH || bullet.x < 0 || bullet.y < 0 || bullet.y > CANVAS_HEIGHT) {
+        bullets.splice(i, 1);
+        continue;
+      }
+
+      // Check collision with CPU paddle pixels (10x10 bullet)
+      const bulletLeft = bullet.x;
+      const bulletRight = bullet.x + BALL_SIZE;
+      const bulletTop = bullet.y;
+      const bulletBottom = bullet.y + BALL_SIZE;
+
+      if (bulletRight > paddleX && bulletLeft < paddleX + PADDLE_WIDTH &&
+          bulletBottom > state.rightPaddleY && bulletTop < state.rightPaddleY + PADDLE_HEIGHT) {
+
+        // Damage all pixels that overlap with the 10x10 bullet
+        let hitPixels = false;
+
+        for (let px = 0; px < PADDLE_WIDTH; px++) {
+          for (let py = 0; py < PADDLE_HEIGHT; py++) {
+            const pixelLeft = paddleX + px;
+            const pixelRight = pixelLeft + 1;
+            const pixelTop = state.rightPaddleY + py;
+            const pixelBottom = pixelTop + 1;
+
+            // Check if bullet overlaps this pixel
+            if (bulletLeft < pixelRight && bulletRight > pixelLeft &&
+                bulletTop < pixelBottom && bulletBottom > pixelTop) {
+
+              // Damage the pixel if it exists
+              if (cpuPixels[px] && cpuPixels[px][py] !== undefined && cpuPixels[px][py] > 0) {
+                cpuPixels[px][py] -= 0.5; // 2 hits to destroy a pixel
+                if (cpuPixels[px][py] < 0) {
+                  cpuPixels[px][py] = 0;
+                }
+                hitPixels = true;
+              }
+            }
+          }
+        }
+
+        if (hitPixels) {
+          // Remove the bullet after hitting pixels
+          bullets.splice(i, 1);
+        }
+      }
     }
 
     // Update human player (left paddle)
@@ -241,22 +353,39 @@ const PongGame: React.FC = () => {
       soundRef.current?.paddleHit();
     }
 
-    // Ball collision with right paddle (swept collision detection)
+    // Ball collision with right paddle (pixel-based collision detection)
     const rightPaddleLeft = CANVAS_WIDTH - PADDLE_WIDTH;
     if (state.prevBallX < rightPaddleLeft - BALL_SIZE && state.ballX >= rightPaddleLeft - BALL_SIZE &&
         state.ballY >= state.rightPaddleY &&
         state.ballY <= state.rightPaddleY + PADDLE_HEIGHT) {
-      state.ballVelX = -state.ballVelX;
-      const hitPos = (state.ballY - state.rightPaddleY) / PADDLE_HEIGHT;
-      state.ballVelY = (hitPos - 0.5) * 8;
 
-      // Move ball to paddle boundary to prevent sticking
-      state.ballX = rightPaddleLeft - BALL_SIZE - 1;
+      // Check if there are any solid pixels in the collision area
+      let hitSolidPixel = false;
 
-      // Increase speed by 10% on paddle hit
-      state.currentSpeedMultiplier *= 1.1;
+      // Simple approach: if ANY pixels in the paddle area are solid, allow the bounce
+      for (let x = 0; x < PADDLE_WIDTH; x++) {
+        for (let y = 0; y < PADDLE_HEIGHT; y++) {
+          if (cpuPixels[x] && cpuPixels[x][y] && cpuPixels[x][y] > 0) {
+            hitSolidPixel = true;
+            break;
+          }
+        }
+        if (hitSolidPixel) break;
+      }
 
-      soundRef.current?.paddleHit();
+      if (hitSolidPixel) {
+        state.ballVelX = -state.ballVelX;
+        const hitPos = (state.ballY - state.rightPaddleY) / PADDLE_HEIGHT;
+        state.ballVelY = (hitPos - 0.5) * 8;
+
+        // Move ball to paddle boundary to prevent sticking
+        state.ballX = rightPaddleLeft - BALL_SIZE - 1;
+
+        // Increase speed by 10% on paddle hit
+        state.currentSpeedMultiplier *= 1.1;
+
+        soundRef.current?.paddleHit();
+      }
     }
 
     // Ball out of bounds (health loss)
@@ -360,6 +489,12 @@ const PongGame: React.FC = () => {
         isBlinkVisible: true,
       };
 
+      // Reset CPU paddle pixels
+      cpuPaddlePixelsRef.current = initializeCpuPaddle();
+
+      // Clear all bullets
+      bulletsRef.current = [];
+
       setIsRunning(true);
       setLeftHealth(100);
       setRightHealth(100);
@@ -405,6 +540,27 @@ const PongGame: React.FC = () => {
           startGame(); // Handles both game over restart and normal start/unpause
         }
       }
+
+      // Handle shooting with spacebar
+      if (e.key === ' ' && isRunning) {
+        e.preventDefault();
+        const currentTime = Date.now();
+
+        // Rate limit shooting (300ms cooldown)
+        if (currentTime - lastShotTimeRef.current > 300) {
+          const paddleCenterY = gameStateRef.current.leftPaddleY + PADDLE_HEIGHT / 2;
+
+          // Create bullet from left paddle center
+          bulletsRef.current.push({
+            x: PADDLE_WIDTH + 2, // Start just to the right of left paddle
+            y: paddleCenterY - BALL_SIZE / 2, // Center the 10x10 bullet vertically
+            vx: 8, // Bullet speed (faster than ball)
+            vy: 0  // Straight horizontal shot
+          });
+
+          lastShotTimeRef.current = currentTime;
+        }
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -422,6 +578,8 @@ const PongGame: React.FC = () => {
 
   useEffect(() => {
     soundRef.current = new SoundGenerator();
+    // Initialize CPU paddle pixels on component mount
+    cpuPaddlePixelsRef.current = initializeCpuPaddle();
     draw();
 
     return () => {
