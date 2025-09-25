@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
 
 :root {
   --background: #000000;
@@ -10,43 +9,17 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
-  --font-mono: "JetBrains Mono", "Courier New", monospace;
+  --font-mono: "monospace", monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: "JetBrains Mono", "Courier New", monospace;
+  font-family: monospace;
   overflow-x: hidden;
 }
 
-/* Terminal-style glow effects */
-.terminal-glow {
-  text-shadow: 0 0 5px #00ff00, 0 0 10px #00ff00, 0 0 15px #00ff00;
-}
 
-/* Scanline animation for retro terminal effect */
-@keyframes scanlines {
-  0% {
-    transform: translateY(-100%);
-  }
-  100% {
-    transform: translateY(100vh);
-  }
-}
-
-.scanlines::before {
-  content: "";
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, #00ff00, transparent);
-  animation: scanlines 2s linear infinite;
-  z-index: 1000;
-  pointer-events: none;
-}
 
 /* Subtle screen flicker */
 @keyframes flicker {

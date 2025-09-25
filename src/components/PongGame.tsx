@@ -53,6 +53,14 @@ const PongGame: React.FC = () => {
     frameCounter: 0,
   });
 
+  // Animation state for paddle blinking
+  const animationStateRef = useRef({
+    blinkingPaddle: null as 'left' | 'right' | null,
+    blinkTimer: 0,
+    blinkCycleTimer: 0,
+    isBlinkVisible: true,
+  });
+
   // Only use useState for UI-reactive values
   const [isRunning, setIsRunning] = useState(false);
   const [leftHealth, setLeftHealth] = useState(100);
@@ -101,8 +109,18 @@ const PongGame: React.FC = () => {
 
     // Draw paddles with terminal green
     ctx.fillStyle = '#00ff00';
-    ctx.fillRect(0, state.leftPaddleY, PADDLE_WIDTH, PADDLE_HEIGHT);
-    ctx.fillRect(CANVAS_WIDTH - PADDLE_WIDTH, state.rightPaddleY, PADDLE_WIDTH, PADDLE_HEIGHT);
+
+    const animState = animationStateRef.current;
+
+    // Draw left paddle (only if not blinking or if blink is visible)
+    if (animState.blinkingPaddle !== 'left' || animState.isBlinkVisible) {
+      ctx.fillRect(0, state.leftPaddleY, PADDLE_WIDTH, PADDLE_HEIGHT);
+    }
+
+    // Draw right paddle (only if not blinking or if blink is visible)
+    if (animState.blinkingPaddle !== 'right' || animState.isBlinkVisible) {
+      ctx.fillRect(CANVAS_WIDTH - PADDLE_WIDTH, state.rightPaddleY, PADDLE_WIDTH, PADDLE_HEIGHT);
+    }
 
     // Draw ball with terminal green
     ctx.fillRect(state.ballX, state.ballY, BALL_SIZE, BALL_SIZE);
@@ -112,6 +130,39 @@ const PongGame: React.FC = () => {
   const updateGame = useCallback(() => {
     const state = gameStateRef.current;
     const keys = keysRef.current;
+    const animState = animationStateRef.current;
+
+    // Handle blinking animation
+    if (animState.blinkingPaddle) {
+      animState.blinkTimer += 16; // Approximate frame time (60fps)
+      animState.blinkCycleTimer += 16;
+
+      // Toggle blink visibility every 200ms
+      if (animState.blinkCycleTimer >= 200) {
+        animState.isBlinkVisible = !animState.isBlinkVisible;
+        animState.blinkCycleTimer = 0;
+      }
+
+      // End blinking after 2 seconds and reset ball
+      if (animState.blinkTimer >= 2000) {
+        animState.blinkingPaddle = null;
+        animState.blinkTimer = 0;
+        animState.blinkCycleTimer = 0;
+        animState.isBlinkVisible = true;
+
+        // Reset ball position
+        state.ballX = CANVAS_WIDTH / 2;
+        state.ballY = CANVAS_HEIGHT / 2;
+        state.prevBallX = CANVAS_WIDTH / 2;
+        state.ballVelX = state.ballVelX > 0 ? -BASE_BALL_SPEED : BASE_BALL_SPEED;
+        state.ballVelY = (Math.random() - 0.5) * 6;
+        state.currentSpeedMultiplier = 1.0;
+        soundRef.current?.score();
+      }
+
+      // If blinking, skip normal ball movement
+      return;
+    }
 
     // Update human player (left paddle)
     if (keys['w'] && state.leftPaddleY > 0) {
@@ -226,12 +277,15 @@ const PongGame: React.FC = () => {
         return;
       }
 
-      state.ballX = CANVAS_WIDTH / 2;
-      state.ballY = CANVAS_HEIGHT / 2;
-      state.prevBallX = CANVAS_WIDTH / 2;
-      state.ballVelX = BASE_BALL_SPEED;
-      state.ballVelY = (Math.random() - 0.5) * 6;
-      soundRef.current?.score();
+      // Start blinking animation for left paddle (they missed)
+      animState.blinkingPaddle = 'left';
+      animState.blinkTimer = 0;
+      animState.blinkCycleTimer = 0;
+      animState.isBlinkVisible = true;
+
+      // Stop ball movement during animation
+      state.ballVelX = 0;
+      state.ballVelY = 0;
     }
     if (state.ballX > CANVAS_WIDTH) {
       state.rightHealth -= 10;
@@ -250,12 +304,15 @@ const PongGame: React.FC = () => {
         return;
       }
 
-      state.ballX = CANVAS_WIDTH / 2;
-      state.ballY = CANVAS_HEIGHT / 2;
-      state.prevBallX = CANVAS_WIDTH / 2;
-      state.ballVelX = -BASE_BALL_SPEED;
-      state.ballVelY = (Math.random() - 0.5) * 6;
-      soundRef.current?.score();
+      // Start blinking animation for right paddle (they missed)
+      animState.blinkingPaddle = 'right';
+      animState.blinkTimer = 0;
+      animState.blinkCycleTimer = 0;
+      animState.isBlinkVisible = true;
+
+      // Stop ball movement during animation
+      state.ballVelX = 0;
+      state.ballVelY = 0;
     }
   }, []);
 
@@ -293,6 +350,14 @@ const PongGame: React.FC = () => {
         targetY: 250,
         lastBallDirection: 0,
         frameCounter: 0,
+      };
+
+      // Reset animation state
+      animationStateRef.current = {
+        blinkingPaddle: null,
+        blinkTimer: 0,
+        blinkCycleTimer: 0,
+        isBlinkVisible: true,
       };
 
       setIsRunning(true);
@@ -367,7 +432,7 @@ const PongGame: React.FC = () => {
   }, [draw]);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-black font-mono scanlines">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-black font-mono">
 
       {/* Health bars above game canvas - hide during overlays */}
       {isRunning && (
@@ -397,7 +462,7 @@ const PongGame: React.FC = () => {
         {gameOver && (
           <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center">
             <div className="text-center text-green-400 font-mono">
-              <div className="text-6xl font-bold mb-4 terminal-glow">
+              <div className="text-6xl font-bold mb-4">
                 GAME OVER
               </div>
               <div className="text-lg text-green-300 animate-pulse">
@@ -410,7 +475,7 @@ const PongGame: React.FC = () => {
         {!isRunning && !gameOver && (
           <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center">
             <div className="text-center text-green-400 font-mono">
-              <div className="text-4xl font-bold mb-4 terminal-glow">
+              <div className="text-4xl font-bold mb-4">
                 PAUSED
               </div>
               <div className="text-lg text-green-300 animate-pulse">
