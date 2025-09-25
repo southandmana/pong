@@ -88,6 +88,47 @@ class SoundGenerator {
     setTimeout(() => this.createBeep(660, 0.15, 0.12, 'sine'), 100);
   };
 
+  bulletFired = () => {
+    // Satisfying bullet firing sound - short sharp blast
+    this.createBeep(800, 0.08, 0.15, 'square');
+    setTimeout(() => this.createBeep(600, 0.05, 0.1, 'square'), 30);
+  };
+
+  bulletImpact = () => {
+    // Bullet hitting paddle - punchy thud
+    this.createBeep(200, 0.12, 0.18, 'sawtooth');
+    setTimeout(() => this.createBeep(150, 0.08, 0.12, 'sawtooth'), 50);
+  };
+
+  paddleDamaged = () => {
+    // Paddle taking damage - cracking sound
+    this.createBeep(300, 0.15, 0.16, 'triangle');
+    setTimeout(() => this.createBeep(250, 0.1, 0.12, 'triangle'), 80);
+    setTimeout(() => this.createBeep(180, 0.12, 0.1, 'triangle'), 160);
+  };
+
+  healthLoss = () => {
+    // Health lost - warning alarm
+    this.createBeep(500, 0.2, 0.2, 'triangle');
+    setTimeout(() => this.createBeep(350, 0.2, 0.15, 'triangle'), 150);
+  };
+
+  itemSpawned = () => {
+    // Subtle item spawn notification - soft chime
+    this.createBeep(660, 0.08, 0.08, 'sine');
+    setTimeout(() => this.createBeep(880, 0.06, 0.06, 'sine'), 40);
+  };
+
+  menuClick = () => {
+    // Menu button click - sharp click
+    this.createBeep(800, 0.05, 0.1, 'square');
+  };
+
+  menuHover = () => {
+    // Menu button hover - subtle beep
+    this.createBeep(600, 0.03, 0.06, 'sine');
+  };
+
   toggleSound = () => {
     this.isEnabled = !this.isEnabled;
     return this.isEnabled;

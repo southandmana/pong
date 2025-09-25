@@ -17,7 +17,10 @@ interface GameState {
   currentSpeedMultiplier: number;
 }
 
+type Screen = 'menu' | 'game' | 'play' | 'settings' | 'online';
+
 const PongGame: React.FC = () => {
+  const [currentScreen, setCurrentScreen] = useState<Screen>('menu');
   // Constants - define these first so they can be used in refs
   const CANVAS_WIDTH = 800;
   const CANVAS_HEIGHT = 600;
@@ -363,6 +366,10 @@ const PongGame: React.FC = () => {
           // If we found overlap with solid pixels, shrink the paddle from edges
           if (foundOverlap) {
             console.log('🎯 Hit confirmed! Reducing paddle health from', cpuPaddleHealthRef.current, 'to', cpuPaddleHealthRef.current - 1);
+
+            // Play bullet impact sound
+            soundRef.current?.bulletImpact();
+
             cpuPaddleHealthRef.current--; // Reduce global paddle health
 
             // Calculate how many pixels to remove from each edge (20 pixels total per hit)
@@ -404,6 +411,9 @@ const PongGame: React.FC = () => {
               pixelsRemovedThisHit: pixelsFromEachEdge * 2
             });
 
+            // Play paddle damage sound (separate from bullet impact)
+            setTimeout(() => soundRef.current?.paddleDamaged(), 100);
+
             hitPixels = true;
           }
         }
@@ -435,6 +445,9 @@ const PongGame: React.FC = () => {
 
       lastItemSpawnRef.current = currentTime;
       console.log('📦 Bullet item spawned at:', safeX.toFixed(0), safeY.toFixed(0));
+
+      // Play item spawn sound
+      soundRef.current?.itemSpawned();
     }
 
     // Remove expired items (10 second lifespan)
@@ -632,6 +645,9 @@ const PongGame: React.FC = () => {
       state.leftHealth -= 10;
       setLeftHealth(state.leftHealth);
 
+      // Play health loss sound
+      soundRef.current?.healthLoss();
+
       // Reset speed multiplier when point is scored
       state.currentSpeedMultiplier = 1.0;
 
@@ -658,6 +674,9 @@ const PongGame: React.FC = () => {
     if (state.ballX > CANVAS_WIDTH) {
       state.rightHealth -= 10;
       setRightHealth(state.rightHealth);
+
+      // Play health loss sound
+      soundRef.current?.healthLoss();
 
       // Reset speed multiplier when point is scored
       state.currentSpeedMultiplier = 1.0;
@@ -776,6 +795,13 @@ const PongGame: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       keysRef.current[e.key] = true;
 
+      // ESC key - return to menu from any screen
+      if (e.key === 'Escape' && currentScreen !== 'menu') {
+        e.preventDefault();
+        setCurrentScreen('menu');
+        return;
+      }
+
       // Handle pause/unpause/start with Enter key
       if (e.key === 'Enter') {
         e.preventDefault();
@@ -807,6 +833,9 @@ const PongGame: React.FC = () => {
             bulletsRef.current.push(newBullet);
             console.log('🔫 Bullet fired!', newBullet, 'Remaining bullets:', remainingBullets - 1);
 
+            // Play bullet firing sound
+            soundRef.current?.bulletFired();
+
             // Decrease bullet count
             setRemainingBullets(remainingBullets - 1);
           } else {
@@ -834,7 +863,7 @@ const PongGame: React.FC = () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [isRunning, pauseGame]);
+  }, [isRunning, pauseGame, currentScreen]);
 
   useEffect(() => {
     soundRef.current = new SoundGenerator();
@@ -851,6 +880,342 @@ const PongGame: React.FC = () => {
     };
   }, [draw]);
 
+  // Main Menu Component
+  const MainMenu = () => (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-black font-mono text-green-400">
+      <div className="text-center space-y-8">
+        {/* Title - Clean and Simple */}
+        <div className="text-center mb-16">
+          <div className="text-8xl font-bold text-green-400 mb-4 tracking-wider">
+            PONGY MAN
+          </div>
+          <div className="text-xl text-green-300 mb-8">
+            ████████████████████████████████
+          </div>
+          <div className="text-lg text-green-300">
+            [ DESTRUCTIBLE PADDLE EDITION ]
+          </div>
+        </div>
+
+        {/* Menu Options */}
+        <div className="space-y-6 text-2xl">
+          <button
+            onClick={() => {
+              soundRef.current?.menuClick();
+              setCurrentScreen('game');
+              startGame();
+            }}
+            onMouseEnter={() => soundRef.current?.menuHover()}
+            className="block w-full px-8 py-4 border-2 border-green-400 bg-black text-green-400 hover:bg-green-400 hover:text-black transition-colors duration-200 font-mono"
+          >
+            [ STORY MODE ]
+          </button>
+
+          <button
+            onClick={() => {
+              soundRef.current?.menuClick();
+              setCurrentScreen('play');
+            }}
+            onMouseEnter={() => soundRef.current?.menuHover()}
+            className="block w-full px-8 py-4 border-2 border-green-400 bg-black text-green-400 hover:bg-green-400 hover:text-black transition-colors duration-200 font-mono"
+          >
+            [ PLAY ]
+          </button>
+
+          <button
+            onClick={() => {
+              soundRef.current?.menuClick();
+              setCurrentScreen('online');
+            }}
+            onMouseEnter={() => soundRef.current?.menuHover()}
+            className="block w-full px-8 py-4 border-2 border-green-400 bg-black text-green-400 hover:bg-green-400 hover:text-black transition-colors duration-200 font-mono"
+          >
+            [ ONLINE ]
+          </button>
+
+          <button
+            onClick={() => {
+              soundRef.current?.menuClick();
+              setCurrentScreen('settings');
+            }}
+            onMouseEnter={() => soundRef.current?.menuHover()}
+            className="block w-full px-8 py-4 border-2 border-green-400 bg-black text-green-400 hover:bg-green-400 hover:text-black transition-colors duration-200 font-mono"
+          >
+            [ SETTINGS ]
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Placeholder Screens
+  const PlaceholderScreen = ({ title, onBack }: { title: string, onBack: () => void }) => (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-black font-mono text-green-400">
+      <div className="text-center space-y-8">
+        <h1 className="text-4xl font-bold">{title}</h1>
+        <p className="text-xl">Coming Soon...</p>
+        <button
+          onClick={() => {
+            soundRef.current?.menuClick();
+            onBack();
+          }}
+          onMouseEnter={() => soundRef.current?.menuHover()}
+          className="px-8 py-4 border-2 border-green-400 bg-black text-green-400 hover:bg-green-400 hover:text-black transition-colors duration-200 font-mono"
+        >
+          [ BACK TO MENU ]
+        </button>
+      </div>
+    </div>
+  );
+
+  const PlatformerScreen = ({ onBack }: { onBack: () => void }) => {
+    const platformerCanvasRef = useRef<HTMLCanvasElement>(null);
+    const platformerLoopRef = useRef<number>();
+
+    // Character state
+    const characterRef = useRef({
+      x: 25,
+      y: 125,
+      width: 24,
+      height: 24,
+      velocityX: 0,
+      velocityY: 0,
+      grounded: false,
+      facingRight: true,
+      currentAnimation: 'idle' as keyof typeof animations,
+      currentFrame: 0,
+      frameTimer: 0,
+      isRunning: false,
+    });
+
+    // Sprite animation data
+    const animations = {
+      idle: { frames: 2, row: 0, startCol: 0, speed: 30 },
+      kick: { frames: 2, row: 0, startCol: 2, speed: 15 },
+      attack: { frames: 2, row: 0, startCol: 4, speed: 15 },
+      damage: { frames: 2, row: 0, startCol: 6, speed: 15 },
+      walk: { frames: 4, row: 1, startCol: 0, speed: 12 },
+      run: { frames: 4, row: 1, startCol: 4, speed: 8 },
+      push: { frames: 4, row: 2, startCol: 0, speed: 12 },
+      pull: { frames: 4, row: 2, startCol: 4, speed: 12 },
+      jump: { frames: 8, row: 3, startCol: 0, speed: 6 },
+      win: { frames: 4, row: 4, startCol: 0, speed: 15 },
+      die: { frames: 4, row: 4, startCol: 4, speed: 15 },
+      sit: { frames: 2, row: 5, startCol: 0, speed: 30 },
+    };
+
+    // Input handling
+    const keysRef = useRef<{[key: string]: boolean}>({});
+
+    useEffect(() => {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        keysRef.current[e.key] = true;
+      };
+
+      const handleKeyUp = (e: KeyboardEvent) => {
+        keysRef.current[e.key] = false;
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+      window.addEventListener('keyup', handleKeyUp);
+
+      return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+        window.removeEventListener('keyup', handleKeyUp);
+      };
+    }, []);
+
+    // Game loop
+    useEffect(() => {
+      const canvas = platformerCanvasRef.current;
+      if (!canvas) return;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // Load sprite sheet
+      const spriteImage = new Image();
+      spriteImage.src = '/character-sprite.png';
+
+      const gameLoop = () => {
+        const character = characterRef.current;
+        const keys = keysRef.current;
+
+        // Handle input and movement
+        let newVelocityX = 0;
+        let newAnimation: keyof typeof animations = 'idle';
+
+        // Horizontal movement (adjusted speeds for zoom)
+        if (keys['ArrowLeft']) {
+          newVelocityX = keys['Shift'] ? -2.5 : -1.5;
+          character.facingRight = false;
+          newAnimation = keys['Shift'] ? 'run' : 'walk';
+        } else if (keys['ArrowRight']) {
+          newVelocityX = keys['Shift'] ? 2.5 : 1.5;
+          character.facingRight = true;
+          newAnimation = keys['Shift'] ? 'run' : 'walk';
+        }
+
+        // Attack actions
+        if (keys['z'] || keys['Z']) {
+          newAnimation = 'attack';
+        } else if (keys['x'] || keys['X']) {
+          newAnimation = 'kick';
+        }
+
+        // Jumping (adjusted for zoom)
+        if (keys[' '] && character.grounded) {
+          character.velocityY = -6;
+          character.grounded = false;
+          newAnimation = 'jump';
+        }
+
+        // Apply physics (adjusted gravity for zoom)
+        character.velocityX = newVelocityX;
+        character.velocityY += 0.3; // gravity
+
+        // Update position
+        character.x += character.velocityX;
+        character.y += character.velocityY;
+
+        // Ground collision (adjusted for zoom)
+        const groundY = (canvas.height / 4) - 12.5 - character.height;
+        if (character.y >= groundY) {
+          character.y = groundY;
+          character.velocityY = 0;
+          character.grounded = true;
+          if (newAnimation === 'jump') {
+            newAnimation = character.velocityX !== 0 ? (Math.abs(character.velocityX) > 1.5 ? 'run' : 'walk') : 'idle';
+          }
+        }
+
+        // Keep character on screen (adjusted for zoom)
+        if (character.x < 0) character.x = 0;
+        if (character.x > (canvas.width / 4) - character.width) character.x = (canvas.width / 4) - character.width;
+
+        // Update animation
+        if (character.currentAnimation !== newAnimation) {
+          character.currentAnimation = newAnimation;
+          character.currentFrame = 0;
+          character.frameTimer = 0;
+        }
+
+        // Animation timing
+        character.frameTimer++;
+        const animData = animations[character.currentAnimation];
+        if (character.frameTimer >= animData.speed) {
+          character.frameTimer = 0;
+          character.currentFrame = (character.currentFrame + 1) % animData.frames;
+        }
+
+        // Set up crisp pixel rendering and zoom
+        ctx.imageSmoothingEnabled = false;
+        ctx.save();
+        ctx.scale(4, 4); // 4x zoom for crisp pixel art
+
+        // Clear canvas (accounting for zoom)
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvas.width / 4, canvas.height / 4);
+
+        // Draw ground (accounting for zoom)
+        ctx.fillStyle = '#00ff00';
+        ctx.fillRect(0, (canvas.height / 4) - 12.5, canvas.width / 4, 12.5);
+
+        // Draw character sprite
+        if (spriteImage.complete) {
+          const anim = animations[character.currentAnimation];
+          const sourceX = (anim.startCol + character.currentFrame) * 24;
+          const sourceY = anim.row * 24;
+
+          ctx.save();
+          if (!character.facingRight) {
+            ctx.scale(-1, 1);
+            ctx.drawImage(
+              spriteImage,
+              sourceX, sourceY, 24, 24,
+              -(character.x + character.width), character.y, character.width, character.height
+            );
+          } else {
+            ctx.drawImage(
+              spriteImage,
+              sourceX, sourceY, 24, 24,
+              character.x, character.y, character.width, character.height
+            );
+          }
+          ctx.restore();
+        }
+
+        // Draw controls (adjusted for zoom)
+        ctx.fillStyle = '#00ff00';
+        ctx.font = '4px monospace';
+        ctx.fillText('Controls:', 2.5, 7.5);
+        ctx.fillText('← → : Move', 2.5, 12.5);
+        ctx.fillText('Shift: Run', 2.5, 17.5);
+        ctx.fillText('Space: Jump', 2.5, 22.5);
+        ctx.fillText('Z: Attack', 2.5, 27.5);
+        ctx.fillText('X: Kick', 2.5, 32.5);
+
+        // Restore canvas transform
+        ctx.restore();
+
+        platformerLoopRef.current = requestAnimationFrame(gameLoop);
+      };
+
+      gameLoop();
+
+      return () => {
+        if (platformerLoopRef.current) {
+          cancelAnimationFrame(platformerLoopRef.current);
+        }
+      };
+    }, []);
+
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-black font-mono">
+        <div className="mb-4">
+          <button
+            onClick={() => {
+              soundRef.current?.menuClick();
+              if (platformerLoopRef.current) {
+                cancelAnimationFrame(platformerLoopRef.current);
+              }
+              onBack();
+            }}
+            onMouseEnter={() => soundRef.current?.menuHover()}
+            className="px-6 py-2 border-2 border-green-400 bg-black text-green-400 hover:bg-green-400 hover:text-black transition-colors duration-200 font-mono"
+          >
+            [ BACK TO MENU ]
+          </button>
+        </div>
+
+        <canvas
+          ref={platformerCanvasRef}
+          width={800}
+          height={600}
+          className="border-2 border-green-400 bg-black"
+        />
+      </div>
+    );
+  };
+
+  // Render current screen
+  if (currentScreen === 'menu') {
+    return <MainMenu />;
+  }
+
+  if (currentScreen === 'online') {
+    return <PlaceholderScreen title="ONLINE MODE" onBack={() => setCurrentScreen('menu')} />;
+  }
+
+  if (currentScreen === 'settings') {
+    return <PlaceholderScreen title="SETTINGS" onBack={() => setCurrentScreen('menu')} />;
+  }
+
+  if (currentScreen === 'play') {
+    return <PlatformerScreen onBack={() => setCurrentScreen('menu')} />;
+  }
+
+  // Game screen (currentScreen === 'game')
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-black font-mono">
 
