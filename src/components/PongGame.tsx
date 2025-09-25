@@ -1005,7 +1005,7 @@ const PongGame: React.FC = () => {
       attack: { frames: 2, row: 0, startCol: 4, speed: 15 },
       damage: { frames: 2, row: 0, startCol: 6, speed: 15 },
       walk: { frames: 4, row: 1, startCol: 0, speed: 6 },
-      run: { frames: 4, row: 1, startCol: 4, speed: 8 },
+      run: { frames: 4, row: 1, startCol: 4, speed: 3 },
       push: { frames: 4, row: 2, startCol: 0, speed: 12 },
       pull: { frames: 4, row: 2, startCol: 4, speed: 12 },
       jump: { frames: 8, row: 3, startCol: 0, speed: 6 },
@@ -1085,10 +1085,12 @@ const PongGame: React.FC = () => {
       const fgImage = new Image();
       fgImage.src = '/fg-layer.png';
 
-      // Define level platforms - single long continuous platform
+      // Define level platforms - single long continuous platform + left wall
       const platforms = [
         // One long platform spanning the entire level, positioned right under character's starting position
-        { type: 'rect', x: -150, y: 149, width: 2000, height: 20 }
+        { type: 'rect', x: -150, y: 149, width: 4000, height: 20 },
+        // Vertical wall at left end of platform - too high to jump over
+        { type: 'rect', x: -150, y: 69, width: 20, height: 80 }
       ];
 
       const gameLoop = () => {
@@ -1128,27 +1130,59 @@ const PongGame: React.FC = () => {
         character.velocityX = newVelocityX;
         character.velocityY += 0.3; // gravity
 
-        // Update position
-        character.x += character.velocityX;
+        // Simple wall blocking - prevent movement into left wall area
+        const nextX = character.x + character.velocityX;
+
+        // Left wall boundary check - if character would move into the wall area, stop them
+        if (nextX < -130) { // Wall extends from x=-150 to x=-130
+          character.x = -130; // Keep character at the wall boundary
+          character.velocityX = 0; // Stop horizontal movement
+        } else {
+          character.x = nextX; // Normal movement
+        }
+
         character.y += character.velocityY;
 
         // Platform collision detection
         character.grounded = false;
         for (const platform of platforms) {
           if (platform.type === 'rect') {
-            // Rectangle collision
-            if (character.x + character.width > platform.x &&
-                character.x < platform.x + platform.width &&
-                character.y + character.height >= platform.y &&
-                character.y + character.height <= platform.y + 20 &&
-                character.velocityY >= 0) {
-              character.y = platform.y - character.height;
-              character.velocityY = 0;
-              character.grounded = true;
-              if (newAnimation === 'jump') {
-                newAnimation = character.velocityX !== 0 ? (Math.abs(character.velocityX) > 1.5 ? 'run' : 'walk') : 'idle';
+            // Check for overlap
+            const overlapX = character.x + character.width > platform.x && character.x < platform.x + platform.width;
+            const overlapY = character.y + character.height > platform.y && character.y < platform.y + platform.height;
+
+            if (overlapX && overlapY) {
+              // Determine if this is primarily a horizontal or vertical collision
+              const overlapLeft = (character.x + character.width) - platform.x;
+              const overlapRight = (platform.x + platform.width) - character.x;
+              const overlapTop = (character.y + character.height) - platform.y;
+              const overlapBottom = (platform.y + platform.height) - character.y;
+
+              const minOverlapX = Math.min(overlapLeft, overlapRight);
+              const minOverlapY = Math.min(overlapTop, overlapBottom);
+
+              // If horizontal overlap is smaller, it's a horizontal collision (hitting wall from side)
+              if (minOverlapX < minOverlapY && character.velocityX !== 0) {
+                if (character.velocityX > 0) {
+                  // Moving right, hit left side of wall
+                  character.x = platform.x - character.width;
+                } else {
+                  // Moving left, hit right side of wall
+                  character.x = platform.x + platform.width;
+                }
+                character.velocityX = 0;
               }
-              break;
+              // Otherwise it's a vertical collision (landing on top or hitting bottom)
+              else if (character.velocityY >= 0 && character.y + character.height >= platform.y &&
+                       character.y + character.height <= platform.y + 20) {
+                character.y = platform.y - character.height;
+                character.velocityY = 0;
+                character.grounded = true;
+                if (newAnimation === 'jump') {
+                  newAnimation = character.velocityX !== 0 ? (Math.abs(character.velocityX) > 1.5 ? 'run' : 'walk') : 'idle';
+                }
+                break;
+              }
             }
           } else if (platform.type === 'triangle') {
             // Simplified triangle collision (treat as sloped surface)
@@ -1362,6 +1396,16 @@ const PongGame: React.FC = () => {
           }
         }
 
+        // Draw black rectangle extending from left edge of screen to collision boundary, from top to bottom of screen
+        ctx.fillStyle = '#000000';
+        const redRectRightX = -130 - currentCamera.x; // Right edge at collision boundary
+        const redRectTopY = 0;                        // Top edge of screen
+        const redRectBottomY = screenHeight;          // Bottom edge of screen
+        const redRectLeftX = 0;                       // Left edge of screen
+        const redRectWidth = redRectRightX - redRectLeftX; // Width from screen edge to boundary
+        const redRectHeight = redRectBottomY - redRectTopY; // Height from screen top to bottom
+        ctx.fillRect(redRectLeftX, redRectTopY, redRectWidth, redRectHeight); // Rectangle spanning entire left area to collision boundary
+
         // Draw character sprite (convert world coordinates to screen coordinates)
         if (spriteImage.complete && spriteImage.naturalHeight !== 0) {
           const anim = animations[character.currentAnimation];
@@ -1408,12 +1452,72 @@ const PongGame: React.FC = () => {
         ctx.font = '8px monospace'; // Same size as menu buttons
         ctx.fillStyle = `rgba(0, 255, 0, ${opacity})`;
 
-        ctx.fillText('Controls:', controlsScreenX, controlsScreenY);
-        ctx.fillText('← → : Move', controlsScreenX, controlsScreenY + 15);
-        ctx.fillText('Shift: Run', controlsScreenX, controlsScreenY + 30);
-        ctx.fillText('Space: Jump', controlsScreenX, controlsScreenY + 45);
-        ctx.fillText('Z: Attack', controlsScreenX, controlsScreenY + 60);
-        ctx.fillText('X: Kick', controlsScreenX, controlsScreenY + 75);
+        ctx.fillText('Use ← → arrow keys to move', controlsScreenX, controlsScreenY);
+
+        // Draw second controls copy further right
+        const controls2WorldX = 530; // Position much further right (double the distance from 70 to 300)
+        const controls2WorldY = 20; // Same Y position
+        const controls2ScreenX = controls2WorldX - cameraState.x;
+        const controls2ScreenY = controls2WorldY - cameraState.y;
+
+        // Calculate horizontal distance-based opacity for second controls
+        const horizontalDistance2 = Math.abs(characterCenterX - controls2WorldX);
+        const opacity2 = Math.max(0.1, 1 - (horizontalDistance2 / maxDistance));
+
+        ctx.font = '8px monospace'; // Same size as menu buttons
+        ctx.fillStyle = `rgba(0, 255, 0, ${opacity2})`;
+
+        ctx.fillText('Press SPACE to jump', controls2ScreenX, controls2ScreenY);
+
+        // Draw third controls copy even further right
+        const controls3WorldX = 1920; // Position moved right 20% more (1600 * 1.2 = 1920)
+        const controls3WorldY = 20; // Same Y position
+        const controls3ScreenX = controls3WorldX - cameraState.x;
+        const controls3ScreenY = controls3WorldY - cameraState.y;
+
+        // Calculate horizontal distance-based opacity for third controls
+        const horizontalDistance3 = Math.abs(characterCenterX - controls3WorldX);
+        const opacity3 = Math.max(0.1, 1 - (horizontalDistance3 / maxDistance));
+
+        ctx.font = '8px monospace'; // Same size as menu buttons
+        ctx.fillStyle = `rgba(0, 255, 0, ${opacity3})`;
+
+        ctx.fillText('Press Z or X to have a little dance', controls3ScreenX, controls3ScreenY);
+
+        // Draw fourth controls copy with double the distance between first and second
+        const controls4WorldX = 990; // 70 + (460 * 2) = 70 + 920 = 990
+        const controls4WorldY = 20; // Same Y position
+        const controls4ScreenX = controls4WorldX - cameraState.x;
+        const controls4ScreenY = controls4WorldY - cameraState.y;
+
+        // Calculate horizontal distance-based opacity for fourth controls
+        const horizontalDistance4 = Math.abs(characterCenterX - controls4WorldX);
+        const opacity4 = Math.max(0.1, 1 - (horizontalDistance4 / maxDistance));
+
+        ctx.font = '8px monospace'; // Same size as menu buttons
+        ctx.fillStyle = `rgba(0, 255, 0, ${opacity4})`;
+
+        ctx.fillText('Hold SHIFT to run faster', controls4ScreenX, controls4ScreenY);
+
+        // Draw fifth controls copy very far from the third text
+        const controls5WorldX = 3500; // Position very far from third text at 2465
+        const controls5WorldY = 20; // Same Y position
+        const controls5ScreenX = controls5WorldX - cameraState.x;
+        const controls5ScreenY = controls5WorldY - cameraState.y;
+
+        // Calculate horizontal distance-based opacity for fifth controls
+        const horizontalDistance5 = Math.abs(characterCenterX - controls5WorldX);
+        const opacity5 = Math.max(0.1, 1 - (horizontalDistance5 / maxDistance));
+
+        ctx.font = '8px monospace'; // Same size as menu buttons
+        ctx.fillStyle = `rgba(0, 255, 0, ${opacity5})`;
+
+        ctx.fillText('Controls:', controls5ScreenX, controls5ScreenY);
+        ctx.fillText('← → : Move', controls5ScreenX, controls5ScreenY + 15);
+        ctx.fillText('Shift: Run', controls5ScreenX, controls5ScreenY + 30);
+        ctx.fillText('Space: Jump', controls5ScreenX, controls5ScreenY + 45);
+        ctx.fillText('Z: Attack', controls5ScreenX, controls5ScreenY + 60);
+        ctx.fillText('X: Kick', controls5ScreenX, controls5ScreenY + 75);
 
         // Restore canvas transform
         ctx.restore();
