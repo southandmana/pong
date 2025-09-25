@@ -345,6 +345,14 @@ const PongGame: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       keysRef.current[e.key] = true;
+
+      // Handle pause with spacebar (only prevent default for spacebar)
+      if (e.key === ' ') {
+        e.preventDefault();
+        if (isRunning) {
+          pauseGame();
+        }
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -358,7 +366,7 @@ const PongGame: React.FC = () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [isRunning, pauseGame]);
 
   useEffect(() => {
     soundRef.current = new SoundGenerator();
@@ -407,49 +415,39 @@ const PongGame: React.FC = () => {
             </div>
           </div>
         )}
+
+        {!isRunning && !gameOver && (
+          <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center">
+            <div className="text-center text-green-400 font-mono">
+              <div className="text-4xl font-bold mb-8 terminal-glow">
+                █ PAUSED █
+              </div>
+              <div className="flex gap-3 justify-center">
+                <button
+                  onClick={startGame}
+                  className="px-3 py-2 bg-black text-green-400 border border-green-400 font-mono text-sm hover:bg-green-400 hover:text-black transition-all"
+                >
+                  [ START ]
+                </button>
+                <button
+                  onClick={resetGame}
+                  className="px-3 py-2 bg-black text-green-400 border border-green-400 font-mono text-sm hover:bg-green-400 hover:text-black transition-all"
+                >
+                  [ RESET ]
+                </button>
+                <button
+                  onClick={toggleSound}
+                  className="px-3 py-2 bg-black text-green-400 border border-green-400 font-mono text-sm hover:bg-green-400 hover:text-black transition-all"
+                >
+                  [ SOUND: {soundEnabled ? 'ON' : 'OFF'} ]
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      <div className="mt-6 text-green-400 text-center font-mono">
-        <div className="flex gap-3 justify-center mb-4">
-          <button
-            onClick={startGame}
-            disabled={isRunning && !gameOver}
-            className="px-3 py-2 bg-black text-green-400 border border-green-400 font-mono text-sm hover:bg-green-400 hover:text-black transition-all disabled:text-gray-600 disabled:border-gray-600 disabled:hover:bg-black disabled:hover:text-gray-600"
-          >
-            [ {gameOver ? 'RESTART' : 'START'} ]
-          </button>
-          <button
-            onClick={pauseGame}
-            disabled={!isRunning}
-            className="px-3 py-2 bg-black text-green-400 border border-green-400 font-mono text-sm hover:bg-green-400 hover:text-black transition-all disabled:text-gray-600 disabled:border-gray-600 disabled:hover:bg-black disabled:hover:text-gray-600"
-          >
-            [ PAUSE ]
-          </button>
-          <button
-            onClick={resetGame}
-            className="px-3 py-2 bg-black text-green-400 border border-green-400 font-mono text-sm hover:bg-green-400 hover:text-black transition-all"
-          >
-            [ RESET ]
-          </button>
-          <button
-            onClick={toggleSound}
-            className="px-3 py-2 bg-black text-green-400 border border-green-400 font-mono text-sm hover:bg-green-400 hover:text-black transition-all"
-          >
-            [ SOUND: {soundEnabled ? 'ON' : 'OFF'} ]
-          </button>
-        </div>
 
-        <div className="mb-4 text-lg">
-          <span className="text-green-300">STATUS:</span> {isRunning ? 'RUNNING' : 'STOPPED'} |
-          <span className="text-green-300">SOUND:</span> {soundEnabled ? 'ENABLED' : 'DISABLED'}
-        </div>
-
-        <div className="border border-green-400 p-4 bg-black">
-          <p className="mb-2 text-green-300 font-bold">█ PLAYER vs CPU █</p>
-          <p className="text-sm">HUMAN PLAYER: [W] UP / [S] DOWN</p>
-          <p className="text-sm">CPU OPPONENT: AUTOMATIC</p>
-        </div>
-      </div>
     </div>
   );
 };
