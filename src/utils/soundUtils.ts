@@ -76,6 +76,11 @@ class SoundGenerator {
     setTimeout(() => this.createBeep(100, 0.8, 0.15, 'sawtooth'), 700);
   };
 
+  emptyGun = () => {
+    // Empty gun click sound - short, dry click
+    this.createBeep(150, 0.05, 0.08, 'square');
+  };
+
   toggleSound = () => {
     this.isEnabled = !this.isEnabled;
     return this.isEnabled;

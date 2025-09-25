@@ -24,8 +24,10 @@ const PongGame: React.FC = () => {
   const PADDLE_WIDTH = 10;
   const PADDLE_HEIGHT = 100;
   const BALL_SIZE = 10;
+  const BULLET_SIZE = 15;
   const BASE_PADDLE_SPEED = 8;
   const BASE_BALL_SPEED = 5;
+  const BULLET_SPEED = 25;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameLoopRef = useRef<number>();
@@ -93,9 +95,11 @@ const PongGame: React.FC = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [leftHealth, setLeftHealth] = useState(100);
   const [rightHealth, setRightHealth] = useState(100);
+  const [remainingBullets, setRemainingBullets] = useState(5);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [gameOver, setGameOver] = useState(false);
   const [winner, setWinner] = useState<'PLAYER' | 'CPU' | null>(null);
+  const [noBulletsMessage, setNoBulletsMessage] = useState(false);
 
   const keysRef = useRef<{ [key: string]: boolean }>({});
 
@@ -110,6 +114,14 @@ const PongGame: React.FC = () => {
     const empty = '░'.repeat(emptyBars);
 
     return `[${filled}${empty}] ${Math.max(0, health)}/100`;
+  };
+
+  const createBulletDisplay = (bullets: number) => {
+    const bulletIcon = '■';
+    const emptyIcon = '□';
+    const activeBullets = bulletIcon.repeat(bullets);
+    const usedBullets = emptyIcon.repeat(5 - bullets);
+    return activeBullets + usedBullets;
   };
 
   const draw = useCallback(() => {
@@ -177,7 +189,7 @@ const PongGame: React.FC = () => {
     const bullets = bulletsRef.current;
     for (let i = 0; i < bullets.length; i++) {
       const bullet = bullets[i];
-      ctx.fillRect(bullet.x, bullet.y, BALL_SIZE, BALL_SIZE); // Same size as ball (10x10)
+      ctx.fillRect(bullet.x, bullet.y, BULLET_SIZE, BULLET_SIZE); // Much bigger bullets (20x20)
     }
 
   }, []);
@@ -243,26 +255,42 @@ const PongGame: React.FC = () => {
         continue;
       }
 
-      // Check collision with CPU paddle pixels (10x10 bullet)
+      // Check collision with CPU paddle pixels (20x20 bullet)
       const bulletLeft = bullet.x;
-      const bulletRight = bullet.x + BALL_SIZE;
+      const bulletRight = bullet.x + BULLET_SIZE;
       const bulletTop = bullet.y;
-      const bulletBottom = bullet.y + BALL_SIZE;
+      const bulletBottom = bullet.y + BULLET_SIZE;
 
       if (bulletRight > paddleX && bulletLeft < paddleX + PADDLE_WIDTH &&
           bulletBottom > state.rightPaddleY && bulletTop < state.rightPaddleY + PADDLE_HEIGHT) {
+
+        console.log('💥 Bullet collision detected!', {
+          bullet: {left: bulletLeft, right: bulletRight, top: bulletTop, bottom: bulletBottom},
+          paddle: {x: paddleX, y: state.rightPaddleY, health: cpuPaddleHealthRef.current}
+        });
 
         // Edge-shrinking destruction: bullet removes pixels from top and bottom edges
         let hitPixels = false;
 
         // Find the primary column based on bullet center
-        const bulletCenterX = bullet.x + BALL_SIZE / 2;
+        const bulletCenterX = bullet.x + BULLET_SIZE / 2;
         const primaryColumn = Math.floor(bulletCenterX - paddleX);
+
+        console.log('🔢 Column calculation:');
+        console.log('  bulletX:', bullet.x, 'bulletCenterX:', bulletCenterX);
+        console.log('  paddleX:', paddleX, 'primaryColumn:', primaryColumn);
+        console.log('  paddleHealth:', cpuPaddleHealthRef.current);
+        console.log('  columnValid:', primaryColumn >= 0 && primaryColumn < PADDLE_WIDTH);
 
         // Only damage if bullet hits valid column and paddle still has health
         if (primaryColumn >= 0 && primaryColumn < PADDLE_WIDTH && cpuPaddleHealthRef.current > 0) {
+          console.log('🔍 Checking primary column:', primaryColumn, 'CPU paddle health:', cpuPaddleHealthRef.current);
+
           // Check if bullet actually overlaps with any solid pixel in this column
           let foundOverlap = false;
+          let pixelsChecked = 0;
+          let solidPixels = 0;
+          let overlappingPixels = 0;
 
           for (let py = 0; py < PADDLE_HEIGHT; py++) {
             const pixelLeft = paddleX + primaryColumn;
@@ -270,20 +298,39 @@ const PongGame: React.FC = () => {
             const pixelTop = state.rightPaddleY + py;
             const pixelBottom = pixelTop + 1;
 
+            pixelsChecked++;
+            const pixelHealth = cpuPixels[primaryColumn] && cpuPixels[primaryColumn][py] !== undefined ? cpuPixels[primaryColumn][py] : 'undefined';
+
+            if (pixelHealth > 0) {
+              solidPixels++;
+            }
+
             // Check if bullet overlaps this pixel
             if (bulletLeft < pixelRight && bulletRight > pixelLeft &&
                 bulletTop < pixelBottom && bulletBottom > pixelTop) {
 
+              overlappingPixels++;
+              console.log(`🎯 Pixel overlap at [${primaryColumn}, ${py}] health:`, pixelHealth);
+
               // Check if this pixel is solid
               if (cpuPixels[primaryColumn] && cpuPixels[primaryColumn][py] !== undefined && cpuPixels[primaryColumn][py] > 0) {
                 foundOverlap = true;
+                console.log('✅ Found solid pixel to damage!');
                 break;
               }
             }
           }
 
+          console.log('📊 Pixel check summary:', {
+            pixelsChecked,
+            solidPixels,
+            overlappingPixels,
+            foundSolidOverlap: foundOverlap
+          });
+
           // If we found overlap with solid pixels, shrink the paddle from edges
           if (foundOverlap) {
+            console.log('🎯 Hit confirmed! Reducing paddle health from', cpuPaddleHealthRef.current, 'to', cpuPaddleHealthRef.current - 1);
             cpuPaddleHealthRef.current--; // Reduce global paddle health
 
             // Calculate how many pixels to remove from each edge (20 pixels total per hit)
@@ -318,6 +365,12 @@ const PongGame: React.FC = () => {
             // Update edge tracking
             edges.topPixelsRemoved = Math.min(edges.topPixelsRemoved + pixelsFromEachEdge, PADDLE_HEIGHT / 2);
             edges.bottomPixelsRemoved = Math.min(edges.bottomPixelsRemoved + pixelsFromEachEdge, PADDLE_HEIGHT / 2);
+
+            console.log('🔥 Paddle damaged! Edge tracking:', {
+              topRemoved: edges.topPixelsRemoved,
+              bottomRemoved: edges.bottomPixelsRemoved,
+              pixelsRemovedThisHit: pixelsFromEachEdge * 2
+            });
 
             hitPixels = true;
           }
@@ -598,8 +651,10 @@ const PongGame: React.FC = () => {
       setIsRunning(true);
       setLeftHealth(100);
       setRightHealth(100);
+      setRemainingBullets(5);
       setGameOver(false);
       setWinner(null);
+      setNoBulletsMessage(false);
       soundRef.current?.gameStart();
       gameLoopRef.current = requestAnimationFrame(gameLoop);
       return;
@@ -648,15 +703,30 @@ const PongGame: React.FC = () => {
 
         // Rate limit shooting (300ms cooldown)
         if (currentTime - lastShotTimeRef.current > 300) {
-          const paddleCenterY = gameStateRef.current.leftPaddleY + PADDLE_HEIGHT / 2;
+          // Check if player has bullets remaining
+          if (remainingBullets > 0) {
+            const paddleCenterY = gameStateRef.current.leftPaddleY + PADDLE_HEIGHT / 2;
 
-          // Create bullet from left paddle center
-          bulletsRef.current.push({
-            x: PADDLE_WIDTH + 2, // Start just to the right of left paddle
-            y: paddleCenterY - BALL_SIZE / 2, // Center the 10x10 bullet vertically
-            vx: 8, // Bullet speed (faster than ball)
-            vy: 0  // Straight horizontal shot
-          });
+            // Create bullet from left paddle center
+            const newBullet = {
+              x: PADDLE_WIDTH + 2, // Start just to the right of left paddle
+              y: paddleCenterY - BULLET_SIZE / 2, // Center the bullet vertically
+              vx: BULLET_SPEED, // Much faster bullet speed
+              vy: 0  // Straight horizontal shot
+            };
+            bulletsRef.current.push(newBullet);
+            console.log('🔫 Bullet fired!', newBullet, 'Remaining bullets:', remainingBullets - 1);
+
+            // Decrease bullet count
+            setRemainingBullets(remainingBullets - 1);
+          } else {
+            // No bullets remaining - play empty gun sound and show message
+            soundRef.current?.emptyGun();
+            setNoBulletsMessage(true);
+
+            // Hide message after 1 second
+            setTimeout(() => setNoBulletsMessage(false), 1000);
+          }
 
           lastShotTimeRef.current = currentTime;
         }
@@ -696,14 +766,30 @@ const PongGame: React.FC = () => {
 
       {/* Health bars above game canvas - hide during overlays */}
       {isRunning && (
-        <div className="flex justify-between w-full max-w-[800px] mb-4 text-green-400 font-mono text-lg">
-          <div className="text-left">
-            PLAYER: {createHealthBar(leftHealth)}
+        <>
+          <div className="flex justify-between w-full max-w-[800px] mb-2 text-green-400 font-mono text-lg">
+            <div className="text-left">
+              PLAYER: {createHealthBar(leftHealth)}
+            </div>
+            <div className="text-right">
+              CPU: {createHealthBar(rightHealth)}
+            </div>
           </div>
-          <div className="text-right">
-            CPU: {createHealthBar(rightHealth)}
+
+          {/* Bullet display */}
+          <div className="flex justify-center w-full max-w-[800px] mb-4 text-yellow-400 font-mono text-lg relative">
+            <div className="text-center">
+              BULLETS: {createBulletDisplay(remainingBullets)}
+            </div>
+
+            {/* NO BULLETS message */}
+            {noBulletsMessage && (
+              <div className="absolute top-8 left-1/2 transform -translate-x-1/2 text-red-400 font-mono text-sm bg-black px-2 py-1 border border-red-400 animate-pulse">
+                NO BULLETS!
+              </div>
+            )}
           </div>
-        </div>
+        </>
       )}
 
       <div className="relative">
