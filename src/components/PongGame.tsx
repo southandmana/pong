@@ -1045,6 +1045,16 @@ const PongGame: React.FC = () => {
       const spriteImage = new Image();
       spriteImage.src = '/character-sprite.png';
 
+      // Load parallax background images
+      const bgImage = new Image();
+      bgImage.src = '/bg-layer.png';
+
+      const midImage = new Image();
+      midImage.src = '/mid-layer.png';
+
+      const fgImage = new Image();
+      fgImage.src = '/fg-layer.png';
+
       const gameLoop = () => {
         const character = characterRef.current;
         const keys = keysRef.current;
@@ -1087,7 +1097,7 @@ const PongGame: React.FC = () => {
         character.y += character.velocityY;
 
         // Ground collision (adjusted for zoom)
-        const groundY = (canvas.height / 4) - 12.5 - character.height;
+        const groundY = (canvas.height / 4) - 20 - character.height;
         if (character.y >= groundY) {
           character.y = groundY;
           character.velocityY = 0;
@@ -1096,20 +1106,6 @@ const PongGame: React.FC = () => {
             newAnimation = character.velocityX !== 0 ? (Math.abs(character.velocityX) > 1.5 ? 'run' : 'walk') : 'idle';
           }
         }
-
-        // Update camera to follow character
-        const cameraState = cameraRef.current;
-        const screenCenterX = (canvas.width / 4) / 2;
-        const screenCenterY = (canvas.height / 4) / 2;
-
-        // Set camera target to center character on screen
-        cameraState.targetX = character.x + character.width / 2 - screenCenterX;
-        cameraState.targetY = character.y + character.height / 2 - screenCenterY;
-
-        // Smooth camera movement (lerp)
-        const lerpFactor = 0.1;
-        cameraState.x += (cameraState.targetX - cameraState.x) * lerpFactor;
-        cameraState.y += (cameraState.targetY - cameraState.y) * lerpFactor;
 
         // No screen boundaries for character - they can move freely in world space
 
@@ -1139,13 +1135,46 @@ const PongGame: React.FC = () => {
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, canvas.width / 4, canvas.height / 4);
 
-        // Draw extended ground (world coordinates converted to screen)
+        // Define screen dimensions and ground thickness first
+        const screenWidth = canvas.width / 4;
+        const screenHeight = canvas.height / 4;
+        const groundThickness = 20; // Fixed thin ground platform
+
+        // Update camera to follow character
+        const cameraState = cameraRef.current;
+        const screenCenterX = screenWidth / 2;
+
+        // Set camera target to follow character both horizontally and vertically
+        cameraState.targetX = character.x + character.width / 2 - screenCenterX;
+        cameraState.targetY = character.y + character.height / 2 - (screenHeight * 0.8);
+
+        // Smooth camera movement (lerp)
+        const lerpFactor = 0.1;
+        cameraState.x += (cameraState.targetX - cameraState.x) * lerpFactor;
+        cameraState.y += (cameraState.targetY - cameraState.y) * lerpFactor;
+
+        // Draw parallax layers in correct order (back to front)
+
+        // Layer 1: Far background (0.2x scroll speed) - FURTHEST BACK
+        if (bgImage.complete) {
+          const bgScrollX = currentCamera.x * 0.2;
+          const tileSize = 16; // Assuming tiles are 16x16 for this zoom level
+
+          // Draw tiled background
+          for (let x = Math.floor(-bgScrollX / tileSize) - 1; x < screenWidth / tileSize + 2; x++) {
+            for (let y = 0; y < screenHeight / tileSize + 1; y++) {
+              ctx.drawImage(bgImage, x * tileSize - (bgScrollX % tileSize), y * tileSize, tileSize, tileSize);
+            }
+          }
+        }
+
+        // GREEN GROUND - Simple green platform
         ctx.fillStyle = '#00ff00';
-        const groundWorldY = (canvas.height / 4) - 12.5;
+        const groundWorldY = screenHeight - groundThickness; // Position at bottom
         const groundScreenX = 0 - currentCamera.x;
         const groundScreenY = groundWorldY - currentCamera.y;
-        // Draw ground much wider than screen
-        ctx.fillRect(groundScreenX - 1000, groundScreenY, 2000, 12.5);
+        // Draw fixed-height ground
+        ctx.fillRect(groundScreenX - 1000, groundScreenY, 2000, groundThickness);
 
         // Draw character sprite (convert world coordinates to screen coordinates)
         if (spriteImage.complete) {
@@ -1175,15 +1204,20 @@ const PongGame: React.FC = () => {
           ctx.restore();
         }
 
-        // Draw controls (adjusted for zoom)
+        // Draw controls in world coordinates (will scroll away as character moves)
         ctx.fillStyle = '#00ff00';
         ctx.font = '4px monospace';
-        ctx.fillText('Controls:', 2.5, 7.5);
-        ctx.fillText('← → : Move', 2.5, 12.5);
-        ctx.fillText('Shift: Run', 2.5, 17.5);
-        ctx.fillText('Space: Jump', 2.5, 22.5);
-        ctx.fillText('Z: Attack', 2.5, 27.5);
-        ctx.fillText('X: Kick', 2.5, 32.5);
+        const controlsWorldX = 10; // Fixed world position
+        const controlsWorldY = 20; // Fixed world position
+        const controlsScreenX = controlsWorldX - cameraState.x;
+        const controlsScreenY = controlsWorldY - cameraState.y;
+
+        ctx.fillText('Controls:', controlsScreenX, controlsScreenY);
+        ctx.fillText('← → : Move', controlsScreenX, controlsScreenY + 5);
+        ctx.fillText('Shift: Run', controlsScreenX, controlsScreenY + 10);
+        ctx.fillText('Space: Jump', controlsScreenX, controlsScreenY + 15);
+        ctx.fillText('Z: Attack', controlsScreenX, controlsScreenY + 20);
+        ctx.fillText('X: Kick', controlsScreenX, controlsScreenY + 25);
 
         // Restore canvas transform
         ctx.restore();
