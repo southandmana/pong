@@ -91,11 +91,15 @@ const PongGame: React.FC = () => {
   const bulletsRef = useRef<{x: number, y: number, vx: number, vy: number}[]>([]);
   const lastShotTimeRef = useRef(0);
 
+  // Item system
+  const itemsRef = useRef<{x: number, y: number, spawnTime: number, type: 'bullets'}[]>([]);
+  const lastItemSpawnRef = useRef(0);
+
   // Only use useState for UI-reactive values
   const [isRunning, setIsRunning] = useState(false);
   const [leftHealth, setLeftHealth] = useState(100);
   const [rightHealth, setRightHealth] = useState(100);
-  const [remainingBullets, setRemainingBullets] = useState(5);
+  const [remainingBullets, setRemainingBullets] = useState(8);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [gameOver, setGameOver] = useState(false);
   const [winner, setWinner] = useState<'PLAYER' | 'CPU' | null>(null);
@@ -119,8 +123,10 @@ const PongGame: React.FC = () => {
   const createBulletDisplay = (bullets: number) => {
     const bulletIcon = '■';
     const emptyIcon = '□';
-    const activeBullets = bulletIcon.repeat(bullets);
-    const usedBullets = emptyIcon.repeat(5 - bullets);
+    const maxBullets = 8; // Updated max to match new system
+    const safeBullets = Math.max(0, Math.min(bullets, maxBullets)); // Clamp between 0 and 8
+    const activeBullets = bulletIcon.repeat(safeBullets);
+    const usedBullets = emptyIcon.repeat(maxBullets - safeBullets);
     return activeBullets + usedBullets;
   };
 
@@ -189,7 +195,33 @@ const PongGame: React.FC = () => {
     const bullets = bulletsRef.current;
     for (let i = 0; i < bullets.length; i++) {
       const bullet = bullets[i];
-      ctx.fillRect(bullet.x, bullet.y, BULLET_SIZE, BULLET_SIZE); // Much bigger bullets (20x20)
+      ctx.fillRect(bullet.x, bullet.y, BULLET_SIZE, BULLET_SIZE); // Much bigger bullets (15x15)
+    }
+
+    // Draw items
+    const items = itemsRef.current;
+    const currentTime = Date.now();
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const itemSize = 20;
+
+      // Pulse effect - make items blink to attract attention
+      const age = currentTime - item.spawnTime;
+      const pulseRate = 0.002; // Speed of pulsing
+      const opacity = 0.7 + 0.3 * Math.sin(age * pulseRate); // Pulse between 0.7 and 1.0
+
+      if (item.type === 'bullets') {
+        // Draw ammo box with pulsing effect
+        ctx.globalAlpha = opacity;
+        ctx.fillStyle = '#ffa500'; // Orange color for bullet items
+        ctx.fillRect(item.x, item.y, itemSize, itemSize);
+
+        // Draw inner bullets pattern [••]
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(item.x + 4, item.y + 8, 3, 3); // First bullet
+        ctx.fillRect(item.x + 13, item.y + 8, 3, 3); // Second bullet
+        ctx.globalAlpha = 1.0; // Reset alpha
+      }
     }
 
   }, []);
@@ -380,6 +412,62 @@ const PongGame: React.FC = () => {
           // Remove the bullet after hitting pixels
           bullets.splice(i, 1);
         }
+      }
+    }
+
+    // Update items
+    const currentTime = Date.now();
+    const items = itemsRef.current;
+
+    // Spawn new items every 12-15 seconds
+    const spawnInterval = 12000 + Math.random() * 3000; // 12-15 seconds
+    if (currentTime - lastItemSpawnRef.current > spawnInterval) {
+      // Spawn right at the left edge where paddle is
+      const safeX = 0; // Right against the left edge
+      const safeY = 50 + Math.random() * (CANVAS_HEIGHT - 100); // Random Y across safe range
+
+      items.push({
+        x: safeX,
+        y: safeY,
+        spawnTime: currentTime,
+        type: 'bullets'
+      });
+
+      lastItemSpawnRef.current = currentTime;
+      console.log('📦 Bullet item spawned at:', safeX.toFixed(0), safeY.toFixed(0));
+    }
+
+    // Remove expired items (10 second lifespan)
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (currentTime - items[i].spawnTime > 10000) {
+        console.log('⏰ Item expired and removed');
+        items.splice(i, 1);
+      }
+    }
+
+    // Check for paddle-item collisions
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i];
+      const itemSize = 20; // Size of item box
+
+      // Check collision with left paddle (player)
+      if (item.x < PADDLE_WIDTH + itemSize &&
+          item.x + itemSize > 0 &&
+          item.y < state.leftPaddleY + PADDLE_HEIGHT &&
+          item.y + itemSize > state.leftPaddleY) {
+
+        // Collect the item!
+        if (item.type === 'bullets') {
+          const newBulletCount = Math.min(remainingBullets + 2, 8); // Max 8 bullets
+          setRemainingBullets(newBulletCount);
+          console.log('🎯 Bullet item collected! Bullets:', remainingBullets, '→', newBulletCount);
+
+          // Play collection sound
+          soundRef.current?.itemCollected();
+        }
+
+        // Remove the collected item
+        items.splice(i, 1);
       }
     }
 
@@ -645,13 +733,15 @@ const PongGame: React.FC = () => {
       cpuPaddleHealthRef.current = 5;
       cpuPaddleEdgesRef.current = { topPixelsRemoved: 0, bottomPixelsRemoved: 0 };
 
-      // Clear all bullets
+      // Clear all bullets and items
       bulletsRef.current = [];
+      itemsRef.current = [];
+      lastItemSpawnRef.current = 0;
 
       setIsRunning(true);
       setLeftHealth(100);
       setRightHealth(100);
-      setRemainingBullets(5);
+      setRemainingBullets(8);
       setGameOver(false);
       setWinner(null);
       setNoBulletsMessage(false);

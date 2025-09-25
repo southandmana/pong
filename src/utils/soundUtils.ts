@@ -81,6 +81,13 @@ class SoundGenerator {
     this.createBeep(150, 0.05, 0.08, 'square');
   };
 
+  itemCollected = () => {
+    // Pleasant pickup sound - ascending chime
+    this.createBeep(440, 0.1, 0.12, 'sine');
+    setTimeout(() => this.createBeep(550, 0.1, 0.12, 'sine'), 50);
+    setTimeout(() => this.createBeep(660, 0.15, 0.12, 'sine'), 100);
+  };
+
   toggleSound = () => {
     this.isEnabled = !this.isEnabled;
     return this.isEnabled;
