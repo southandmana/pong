@@ -21,6 +21,7 @@ type Screen = 'menu' | 'game' | 'play' | 'settings' | 'online';
 
 const PongGame: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<Screen>('menu');
+  const [restartKey, setRestartKey] = useState(0);
   // Constants - define these first so they can be used in refs
   const CANVAS_WIDTH = 800;
   const CANVAS_HEIGHT = 600;
@@ -971,6 +972,7 @@ const PongGame: React.FC = () => {
   const PlatformerScreen = ({ onBack }: { onBack: () => void }) => {
     const platformerCanvasRef = useRef<HTMLCanvasElement>(null);
     const platformerLoopRef = useRef<number>();
+    const [gameOver, setGameOver] = useState(false);
 
     // Character state
     const characterRef = useRef({
@@ -991,9 +993,9 @@ const PongGame: React.FC = () => {
     // Camera state
     const cameraRef = useRef({
       x: 0,
-      y: 0,
+      y: -130,
       targetX: 0,
-      targetY: 0,
+      targetY: -130,
     });
 
     // Sprite animation data
@@ -1002,7 +1004,7 @@ const PongGame: React.FC = () => {
       kick: { frames: 2, row: 0, startCol: 2, speed: 15 },
       attack: { frames: 2, row: 0, startCol: 4, speed: 15 },
       damage: { frames: 2, row: 0, startCol: 6, speed: 15 },
-      walk: { frames: 4, row: 1, startCol: 0, speed: 12 },
+      walk: { frames: 4, row: 1, startCol: 0, speed: 6 },
       run: { frames: 4, row: 1, startCol: 4, speed: 8 },
       push: { frames: 4, row: 2, startCol: 0, speed: 12 },
       pull: { frames: 4, row: 2, startCol: 4, speed: 12 },
@@ -1018,6 +1020,20 @@ const PongGame: React.FC = () => {
     useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
         keysRef.current[e.key] = true;
+
+        // Handle game over controls
+        if (gameOver) {
+          if (e.key === 'r' || e.key === 'R') {
+            // Force complete component restart by incrementing key
+            setRestartKey(prev => prev + 1);
+            setGameOver(false);
+            return;
+          }
+          if (e.key === 'Escape') {
+            onBack();
+            return;
+          }
+        }
       };
 
       const handleKeyUp = (e: KeyboardEvent) => {
@@ -1031,10 +1047,16 @@ const PongGame: React.FC = () => {
         window.removeEventListener('keydown', handleKeyDown);
         window.removeEventListener('keyup', handleKeyUp);
       };
-    }, []);
+    }, [gameOver, onBack]);
 
     // Game loop
     useEffect(() => {
+
+      // Don't start game loop if game is over
+      if (gameOver) {
+        return;
+      }
+
       const canvas = platformerCanvasRef.current;
       if (!canvas) return;
 
@@ -1045,6 +1067,14 @@ const PongGame: React.FC = () => {
       const spriteImage = new Image();
       spriteImage.src = '/character-sprite.png';
 
+      // Load tilemap
+      const tilemapImage = new Image();
+      tilemapImage.src = '/tilemap.png';
+
+      // Load background image
+      const backgroundImage = new Image();
+      backgroundImage.src = '/background.png';
+
       // Load parallax background images
       const bgImage = new Image();
       bgImage.src = '/bg-layer.png';
@@ -1054,6 +1084,12 @@ const PongGame: React.FC = () => {
 
       const fgImage = new Image();
       fgImage.src = '/fg-layer.png';
+
+      // Define level platforms - single long continuous platform
+      const platforms = [
+        // One long platform spanning the entire level, positioned right under character's starting position
+        { type: 'rect', x: -150, y: 149, width: 2000, height: 20 }
+      ];
 
       const gameLoop = () => {
         const character = characterRef.current;
@@ -1096,14 +1132,71 @@ const PongGame: React.FC = () => {
         character.x += character.velocityX;
         character.y += character.velocityY;
 
-        // Ground collision (adjusted for zoom)
-        const groundY = (canvas.height / 4) - 20 - character.height;
-        if (character.y >= groundY) {
-          character.y = groundY;
-          character.velocityY = 0;
-          character.grounded = true;
-          if (newAnimation === 'jump') {
-            newAnimation = character.velocityX !== 0 ? (Math.abs(character.velocityX) > 1.5 ? 'run' : 'walk') : 'idle';
+        // Platform collision detection
+        character.grounded = false;
+        for (const platform of platforms) {
+          if (platform.type === 'rect') {
+            // Rectangle collision
+            if (character.x + character.width > platform.x &&
+                character.x < platform.x + platform.width &&
+                character.y + character.height >= platform.y &&
+                character.y + character.height <= platform.y + 20 &&
+                character.velocityY >= 0) {
+              character.y = platform.y - character.height;
+              character.velocityY = 0;
+              character.grounded = true;
+              if (newAnimation === 'jump') {
+                newAnimation = character.velocityX !== 0 ? (Math.abs(character.velocityX) > 1.5 ? 'run' : 'walk') : 'idle';
+              }
+              break;
+            }
+          } else if (platform.type === 'triangle') {
+            // Simplified triangle collision (treat as sloped surface)
+            const leftX = Math.min(platform.x1, platform.x2, platform.x3);
+            const rightX = Math.max(platform.x1, platform.x2, platform.x3);
+            const topY = Math.min(platform.y1, platform.y2, platform.y3);
+            const bottomY = Math.max(platform.y1, platform.y2, platform.y3);
+
+            if (character.x + character.width > leftX &&
+                character.x < rightX &&
+                character.y + character.height >= topY &&
+                character.y + character.height <= bottomY + 10 &&
+                character.velocityY >= 0) {
+
+              // Calculate slope height at character position
+              const charCenterX = character.x + character.width / 2;
+              let slopeY;
+
+              // Calculate slope based on the actual triangle shape
+              // For the downward ramp: (500,100) -> (560,100) -> (560,130)
+              // This creates a slope from (500,100) to (560,130)
+
+              if (platform.x1 === 500 && platform.y1 === 100) { // Downward ramp specifically
+                const progress = (charCenterX - platform.x1) / (platform.x3 - platform.x1);
+                slopeY = platform.y1 + (platform.y3 - platform.y1) * progress;
+              } else if (platform.x1 === 320 && platform.y1 === 140) { // Upward ramp specifically
+                const progress = (charCenterX - platform.x1) / (platform.x2 - platform.x1);
+                slopeY = platform.y1 + (platform.y2 - platform.y1) * progress;
+              } else { // Mountain peak - use lowest point as base
+                if (charCenterX <= 900) { // Left side of mountain
+                  const progress = (charCenterX - platform.x1) / (platform.x2 - platform.x1);
+                  slopeY = platform.y1 + (platform.y2 - platform.y1) * progress;
+                } else { // Right side of mountain
+                  const progress = (charCenterX - platform.x2) / (platform.x3 - platform.x2);
+                  slopeY = platform.y2 + (platform.y3 - platform.y2) * progress;
+                }
+              }
+
+              if (character.y + character.height >= slopeY - 5) {
+                character.y = slopeY - character.height;
+                character.velocityY = 0;
+                character.grounded = true;
+                if (newAnimation === 'jump') {
+                  newAnimation = character.velocityX !== 0 ? (Math.abs(character.velocityX) > 1.5 ? 'run' : 'walk') : 'idle';
+                }
+                break;
+              }
+            }
           }
         }
 
@@ -1127,57 +1220,150 @@ const PongGame: React.FC = () => {
         // Set up crisp pixel rendering and zoom
         ctx.imageSmoothingEnabled = false;
         ctx.save();
-        ctx.scale(4, 4); // 4x zoom for crisp pixel art
+        ctx.scale(2, 2); // 2x zoom for wider view
 
         const currentCamera = cameraRef.current;
 
         // Clear canvas (accounting for zoom)
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(0, 0, canvas.width / 4, canvas.height / 4);
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(0, 0, canvas.width / 2, canvas.height / 2);
 
         // Define screen dimensions and ground thickness first
-        const screenWidth = canvas.width / 4;
-        const screenHeight = canvas.height / 4;
+        const screenWidth = canvas.width / 2;
+        const screenHeight = canvas.height / 2;
         const groundThickness = 20; // Fixed thin ground platform
 
         // Update camera to follow character
         const cameraState = cameraRef.current;
         const screenCenterX = screenWidth / 2;
 
-        // Set camera target to follow character both horizontally and vertically
+        // Set camera target to follow character horizontally only - vertically locked
         cameraState.targetX = character.x + character.width / 2 - screenCenterX;
-        cameraState.targetY = character.y + character.height / 2 - (screenHeight * 0.8);
+        // cameraState.targetY stays unchanged - vertically locked
+
 
         // Smooth camera movement (lerp)
         const lerpFactor = 0.1;
         cameraState.x += (cameraState.targetX - cameraState.x) * lerpFactor;
         cameraState.y += (cameraState.targetY - cameraState.y) * lerpFactor;
 
-        // Draw parallax layers in correct order (back to front)
+        // Check if character fell off screen (death condition)
+        const cameraBottomY = cameraState.y + screenHeight;
+        if (character.y > cameraBottomY + 100) { // 100px buffer below camera view
+          setGameOver(true);
+          return; // Stop the game loop
+        }
 
-        // Layer 1: Far background (0.2x scroll speed) - FURTHEST BACK
-        if (bgImage.complete) {
-          const bgScrollX = currentCamera.x * 0.2;
-          const tileSize = 16; // Assuming tiles are 16x16 for this zoom level
+        // Draw looping background
+        if (backgroundImage.complete && backgroundImage.naturalHeight !== 0) {
+          const bgWidth = backgroundImage.width;
+          const bgHeight = backgroundImage.height;
 
-          // Draw tiled background
-          for (let x = Math.floor(-bgScrollX / tileSize) - 1; x < screenWidth / tileSize + 2; x++) {
-            for (let y = 0; y < screenHeight / tileSize + 1; y++) {
-              ctx.drawImage(bgImage, x * tileSize - (bgScrollX % tileSize), y * tileSize, tileSize, tileSize);
-            }
+          // Background offset (independent of camera) - change this to move background
+          const backgroundOffsetX = 0; // Change this value to shift background left/right
+          const backgroundOffsetY = 0; // Change this value to shift background up/down
+
+          // Calculate background scroll position (slower than camera for parallax effect)
+          const bgScrollX = currentCamera.x * 0.3 + backgroundOffsetX;
+
+          // Scale background to fit screen height while preserving aspect ratio
+          const scale = screenHeight / bgHeight;
+          const scaledWidth = bgWidth * scale;
+          const scaledHeight = screenHeight;
+
+          // Draw repeating background tiles to cover the screen (using scaled width)
+          const startX = Math.floor(-bgScrollX / scaledWidth) - 1;
+          const endX = Math.ceil((screenWidth - bgScrollX) / scaledWidth) + 1;
+
+          for (let x = startX; x <= endX; x++) {
+            const drawX = x * scaledWidth - (bgScrollX % scaledWidth);
+
+            const drawY = backgroundOffsetY; // Apply vertical offset
+            ctx.drawImage(backgroundImage, drawX, drawY, scaledWidth, scaledHeight);
           }
         }
 
-        // GREEN GROUND - Simple green platform
+        // Draw all platforms
         ctx.fillStyle = '#00ff00';
-        const groundWorldY = screenHeight - groundThickness; // Position at bottom
-        const groundScreenX = 0 - currentCamera.x;
-        const groundScreenY = groundWorldY - currentCamera.y;
-        // Draw fixed-height ground
-        ctx.fillRect(groundScreenX - 1000, groundScreenY, 2000, groundThickness);
+
+        for (const platform of platforms) {
+          if (platform.type === 'rect') {
+            // Draw tiled platform using tilemap
+            const screenX = platform.x - currentCamera.x;
+            const screenY = platform.y - currentCamera.y;
+
+            // Draw platform with tilemap tiles
+            if (tilemapImage.complete && tilemapImage.naturalHeight !== 0) {
+              const tileSize = 16; // Each tile is 16x16 pixels
+
+              // Single consistent tile set - solid black tiles from tilemap
+              const tiles = {
+                topLeft: { x: 272, y: 112 }, topMiddle: { x: 272, y: 112 }, topRight: { x: 272, y: 112 },
+                middleLeft: { x: 272, y: 112 }, middle: { x: 272, y: 112 }, middleRight: { x: 272, y: 112 },
+                bottomLeft: { x: 272, y: 112 }, bottomMiddle: { x: 272, y: 112 }, bottomRight: { x: 272, y: 112 }
+              };
+
+              // Draw tiles to fill the platform area
+              const tilesX = Math.ceil(platform.width / tileSize);
+              const tilesY = Math.ceil(platform.height / tileSize);
+
+              for (let tx = 0; tx < tilesX; tx++) {
+                for (let ty = 0; ty < tilesY; ty++) {
+                  const destX = screenX + (tx * tileSize);
+                  const destY = screenY + (ty * tileSize);
+
+                  // Choose tile based on position
+                  let selectedTile;
+                  const isTop = ty === 0;
+                  const isBottom = ty === tilesY - 1;
+                  const isLeft = tx === 0;
+                  const isRight = tx === tilesX - 1;
+
+                  if (isTop && isLeft) selectedTile = tiles.topLeft;
+                  else if (isTop && isRight) selectedTile = tiles.topRight;
+                  else if (isTop) selectedTile = tiles.topMiddle;
+                  else if (isBottom && isLeft) selectedTile = tiles.bottomLeft;
+                  else if (isBottom && isRight) selectedTile = tiles.bottomRight;
+                  else if (isBottom) selectedTile = tiles.bottomMiddle;
+                  else if (isLeft) selectedTile = tiles.middleLeft;
+                  else if (isRight) selectedTile = tiles.middleRight;
+                  else selectedTile = tiles.middle;
+
+                  // Clip the tile if it extends beyond platform bounds
+                  const drawWidth = Math.min(tileSize, platform.width - (tx * tileSize));
+                  const drawHeight = Math.min(tileSize, platform.height - (ty * tileSize));
+
+                  ctx.drawImage(
+                    tilemapImage,
+                    selectedTile.x, selectedTile.y, drawWidth, drawHeight, // Source
+                    destX, destY, drawWidth, drawHeight // Destination
+                  );
+                }
+              }
+            } else {
+              // Fallback to green rectangle if tilemap isn't loaded yet
+              ctx.fillRect(screenX, screenY, platform.width, platform.height);
+            }
+          } else if (platform.type === 'triangle') {
+            // Draw triangle platform
+            const screenX1 = platform.x1 - currentCamera.x;
+            const screenY1 = platform.y1 - currentCamera.y;
+            const screenX2 = platform.x2 - currentCamera.x;
+            const screenY2 = platform.y2 - currentCamera.y;
+            const screenX3 = platform.x3 - currentCamera.x;
+            const screenY3 = platform.y3 - currentCamera.y;
+
+            ctx.beginPath();
+            ctx.moveTo(screenX1, screenY1);
+            ctx.lineTo(screenX2, screenY2);
+            ctx.lineTo(screenX3, screenY3);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
 
         // Draw character sprite (convert world coordinates to screen coordinates)
-        if (spriteImage.complete) {
+        if (spriteImage.complete && spriteImage.naturalHeight !== 0) {
           const anim = animations[character.currentAnimation];
           const sourceX = (anim.startCol + character.currentFrame) * 24;
           const sourceY = anim.row * 24;
@@ -1185,6 +1371,7 @@ const PongGame: React.FC = () => {
           // Convert character world position to screen position
           const characterScreenX = character.x - currentCamera.x;
           const characterScreenY = character.y - currentCamera.y;
+
 
           ctx.save();
           if (!character.facingRight) {
@@ -1204,25 +1391,37 @@ const PongGame: React.FC = () => {
           ctx.restore();
         }
 
-        // Draw controls in world coordinates (will scroll away as character moves)
-        ctx.fillStyle = '#00ff00';
-        ctx.font = '4px monospace';
-        const controlsWorldX = 10; // Fixed world position
+        // Draw controls in world coordinates with distance-based transparency
+        const controlsWorldX = 70; // Center controls near character's starting position
         const controlsWorldY = 20; // Fixed world position
         const controlsScreenX = controlsWorldX - cameraState.x;
         const controlsScreenY = controlsWorldY - cameraState.y;
 
+        // Calculate horizontal distance-based opacity
+        const characterCenterX = character.x + character.width / 2;
+        const horizontalDistance = Math.abs(characterCenterX - controlsWorldX);
+
+        // Opacity decreases with horizontal distance (max distance ~200px for full fade)
+        const maxDistance = 200;
+        const opacity = Math.max(0.1, 1 - (horizontalDistance / maxDistance));
+
+        ctx.font = '8px monospace'; // Same size as menu buttons
+        ctx.fillStyle = `rgba(0, 255, 0, ${opacity})`;
+
         ctx.fillText('Controls:', controlsScreenX, controlsScreenY);
-        ctx.fillText('← → : Move', controlsScreenX, controlsScreenY + 5);
-        ctx.fillText('Shift: Run', controlsScreenX, controlsScreenY + 10);
-        ctx.fillText('Space: Jump', controlsScreenX, controlsScreenY + 15);
-        ctx.fillText('Z: Attack', controlsScreenX, controlsScreenY + 20);
-        ctx.fillText('X: Kick', controlsScreenX, controlsScreenY + 25);
+        ctx.fillText('← → : Move', controlsScreenX, controlsScreenY + 15);
+        ctx.fillText('Shift: Run', controlsScreenX, controlsScreenY + 30);
+        ctx.fillText('Space: Jump', controlsScreenX, controlsScreenY + 45);
+        ctx.fillText('Z: Attack', controlsScreenX, controlsScreenY + 60);
+        ctx.fillText('X: Kick', controlsScreenX, controlsScreenY + 75);
 
         // Restore canvas transform
         ctx.restore();
 
-        platformerLoopRef.current = requestAnimationFrame(gameLoop);
+        // Continue game loop only if game is not over
+        if (!gameOver) {
+          platformerLoopRef.current = requestAnimationFrame(gameLoop);
+        }
       };
 
       gameLoop();
@@ -1232,7 +1431,7 @@ const PongGame: React.FC = () => {
           cancelAnimationFrame(platformerLoopRef.current);
         }
       };
-    }, []);
+    }, [gameOver, restartKey]);
 
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-black font-mono">
@@ -1252,12 +1451,30 @@ const PongGame: React.FC = () => {
           </button>
         </div>
 
-        <canvas
-          ref={platformerCanvasRef}
-          width={800}
-          height={600}
-          className="border-2 border-green-400 bg-black"
-        />
+        <div className="relative">
+          <canvas
+            ref={platformerCanvasRef}
+            width={800}
+            height={600}
+            className="border-2 border-white bg-black"
+          />
+
+          {gameOver && (
+            <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center">
+              <div className="text-center text-green-400 font-mono">
+                <div className="text-6xl font-bold mb-4">
+                  GAME OVER
+                </div>
+                <div className="text-2xl mb-4">
+                  You fell to your doom!
+                </div>
+                <div className="text-lg text-green-300 animate-pulse">
+                  Press R to restart or ESC to return to menu
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     );
   };
