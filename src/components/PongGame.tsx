@@ -76,6 +76,15 @@ const PongGame: React.FC = () => {
     return pixels;
   };
 
+  // Global paddle health tracking - 5 bullets to destroy entire paddle
+  const cpuPaddleHealthRef = useRef<number>(5);
+
+  // Track how many pixels have been removed from top and bottom edges
+  const cpuPaddleEdgesRef = useRef<{topPixelsRemoved: number, bottomPixelsRemoved: number}>({
+    topPixelsRemoved: 0,
+    bottomPixelsRemoved: 0
+  });
+
   // Bullet system
   const bulletsRef = useRef<{x: number, y: number, vx: number, vy: number}[]>([]);
   const lastShotTimeRef = useRef(0);
@@ -228,8 +237,8 @@ const PongGame: React.FC = () => {
       bullet.x += bullet.vx;
       bullet.y += bullet.vy;
 
-      // Remove bullets that go off screen
-      if (bullet.x > CANVAS_WIDTH || bullet.x < 0 || bullet.y < 0 || bullet.y > CANVAS_HEIGHT) {
+      // Remove bullets that go off screen (but allow them to hit the right edge)
+      if (bullet.x > CANVAS_WIDTH + 20 || bullet.x < 0 || bullet.y < 0 || bullet.y > CANVAS_HEIGHT) {
         bullets.splice(i, 1);
         continue;
       }
@@ -243,12 +252,20 @@ const PongGame: React.FC = () => {
       if (bulletRight > paddleX && bulletLeft < paddleX + PADDLE_WIDTH &&
           bulletBottom > state.rightPaddleY && bulletTop < state.rightPaddleY + PADDLE_HEIGHT) {
 
-        // Damage all pixels that overlap with the 10x10 bullet
+        // Edge-shrinking destruction: bullet removes pixels from top and bottom edges
         let hitPixels = false;
 
-        for (let px = 0; px < PADDLE_WIDTH; px++) {
+        // Find the primary column based on bullet center
+        const bulletCenterX = bullet.x + BALL_SIZE / 2;
+        const primaryColumn = Math.floor(bulletCenterX - paddleX);
+
+        // Only damage if bullet hits valid column and paddle still has health
+        if (primaryColumn >= 0 && primaryColumn < PADDLE_WIDTH && cpuPaddleHealthRef.current > 0) {
+          // Check if bullet actually overlaps with any solid pixel in this column
+          let foundOverlap = false;
+
           for (let py = 0; py < PADDLE_HEIGHT; py++) {
-            const pixelLeft = paddleX + px;
+            const pixelLeft = paddleX + primaryColumn;
             const pixelRight = pixelLeft + 1;
             const pixelTop = state.rightPaddleY + py;
             const pixelBottom = pixelTop + 1;
@@ -257,15 +274,52 @@ const PongGame: React.FC = () => {
             if (bulletLeft < pixelRight && bulletRight > pixelLeft &&
                 bulletTop < pixelBottom && bulletBottom > pixelTop) {
 
-              // Damage the pixel if it exists
-              if (cpuPixels[px] && cpuPixels[px][py] !== undefined && cpuPixels[px][py] > 0) {
-                cpuPixels[px][py] -= 0.5; // 2 hits to destroy a pixel
-                if (cpuPixels[px][py] < 0) {
-                  cpuPixels[px][py] = 0;
-                }
-                hitPixels = true;
+              // Check if this pixel is solid
+              if (cpuPixels[primaryColumn] && cpuPixels[primaryColumn][py] !== undefined && cpuPixels[primaryColumn][py] > 0) {
+                foundOverlap = true;
+                break;
               }
             }
+          }
+
+          // If we found overlap with solid pixels, shrink the paddle from edges
+          if (foundOverlap) {
+            cpuPaddleHealthRef.current--; // Reduce global paddle health
+
+            // Calculate how many pixels to remove from each edge (20 pixels total per hit)
+            const pixelsPerHit = Math.floor(PADDLE_HEIGHT / 5); // 100 / 5 = 20 pixels per hit
+            const pixelsFromEachEdge = Math.floor(pixelsPerHit / 2); // 10 pixels from each edge
+
+            const edges = cpuPaddleEdgesRef.current;
+
+            // Remove pixels from top and bottom edges across all columns
+            for (let col = 0; col < PADDLE_WIDTH; col++) {
+              if (cpuPixels[col]) {
+                // Remove from top edge - start from where we left off
+                const topStart = edges.topPixelsRemoved;
+                const topEnd = Math.min(topStart + pixelsFromEachEdge, PADDLE_HEIGHT / 2);
+                for (let y = topStart; y < topEnd; y++) {
+                  if (cpuPixels[col][y] !== undefined) {
+                    cpuPixels[col][y] = 0;
+                  }
+                }
+
+                // Remove from bottom edge - start from where we left off
+                const bottomStart = Math.max(PADDLE_HEIGHT - edges.bottomPixelsRemoved - pixelsFromEachEdge, PADDLE_HEIGHT / 2);
+                const bottomEnd = PADDLE_HEIGHT - edges.bottomPixelsRemoved;
+                for (let y = bottomStart; y < bottomEnd; y++) {
+                  if (cpuPixels[col][y] !== undefined) {
+                    cpuPixels[col][y] = 0;
+                  }
+                }
+              }
+            }
+
+            // Update edge tracking
+            edges.topPixelsRemoved = Math.min(edges.topPixelsRemoved + pixelsFromEachEdge, PADDLE_HEIGHT / 2);
+            edges.bottomPixelsRemoved = Math.min(edges.bottomPixelsRemoved + pixelsFromEachEdge, PADDLE_HEIGHT / 2);
+
+            hitPixels = true;
           }
         }
 
@@ -279,9 +333,11 @@ const PongGame: React.FC = () => {
     // Update human player (left paddle)
     if (keys['w'] && state.leftPaddleY > 0) {
       state.leftPaddleY -= BASE_PADDLE_SPEED;
+      console.log('Moving paddle UP, new Y:', state.leftPaddleY);
     }
     if (keys['s'] && state.leftPaddleY < CANVAS_HEIGHT - PADDLE_HEIGHT) {
       state.leftPaddleY += BASE_PADDLE_SPEED;
+      console.log('Moving paddle DOWN, new Y:', state.leftPaddleY);
     }
 
     // Update AI player (right paddle)
@@ -355,23 +411,65 @@ const PongGame: React.FC = () => {
 
     // Ball collision with right paddle (pixel-based collision detection)
     const rightPaddleLeft = CANVAS_WIDTH - PADDLE_WIDTH;
-    if (state.prevBallX < rightPaddleLeft - BALL_SIZE && state.ballX >= rightPaddleLeft - BALL_SIZE &&
-        state.ballY >= state.rightPaddleY &&
-        state.ballY <= state.rightPaddleY + PADDLE_HEIGHT) {
+    if (state.prevBallX < rightPaddleLeft && state.ballX + BALL_SIZE > rightPaddleLeft &&
+        state.ballY + BALL_SIZE > state.rightPaddleY &&
+        state.ballY < state.rightPaddleY + PADDLE_HEIGHT) {
 
-      // Check if there are any solid pixels in the collision area
+      // Debug: Check if collision detection is running
+      console.log('🏓 Ball collision check starting');
+
+      // Proper pixel collision: check only where ball actually overlaps paddle
       let hitSolidPixel = false;
+      let totalPixelsChecked = 0;
+      let solidPixelsFound = 0;
+      let overlappingPixels = 0;
 
-      // Simple approach: if ANY pixels in the paddle area are solid, allow the bounce
+      // Calculate ball's collision area with paddle
+      const ballLeft = state.ballX;
+      const ballRight = state.ballX + BALL_SIZE;
+      const ballTop = state.ballY;
+      const ballBottom = state.ballY + BALL_SIZE;
+
+      console.log('Ball bounds:', { ballLeft, ballRight, ballTop, ballBottom });
+      console.log('Paddle bounds:', { paddleLeft: rightPaddleLeft, paddleRight: rightPaddleLeft + PADDLE_WIDTH, paddleTop: state.rightPaddleY, paddleBottom: state.rightPaddleY + PADDLE_HEIGHT });
+
+      // Check only paddle pixels that overlap with the ball
       for (let x = 0; x < PADDLE_WIDTH; x++) {
         for (let y = 0; y < PADDLE_HEIGHT; y++) {
-          if (cpuPixels[x] && cpuPixels[x][y] && cpuPixels[x][y] > 0) {
-            hitSolidPixel = true;
-            break;
+          const pixelLeft = rightPaddleLeft + x;
+          const pixelRight = pixelLeft + 1;
+          const pixelTop = state.rightPaddleY + y;
+          const pixelBottom = pixelTop + 1;
+
+          totalPixelsChecked++;
+
+          // Check pixel health
+          const pixelHealth = cpuPixels[x] && cpuPixels[x][y] !== undefined ? cpuPixels[x][y] : 'undefined';
+          if (pixelHealth > 0) {
+            solidPixelsFound++;
+          }
+
+          // Check if ball overlaps this specific pixel
+          if (ballLeft < pixelRight && ballRight > pixelLeft &&
+              ballTop < pixelBottom && ballBottom > pixelTop) {
+
+            overlappingPixels++;
+            console.log(`Pixel overlap found at [${x},${y}] health: ${pixelHealth}`);
+
+            // Check if this overlapping pixel is solid (health > 0)
+            if (cpuPixels[x] && cpuPixels[x][y] && cpuPixels[x][y] > 0) {
+              hitSolidPixel = true;
+              console.log('✅ Solid pixel hit! Ball should bounce');
+              break;
+            } else {
+              console.log('❌ Destroyed pixel, ball passes through');
+            }
           }
         }
         if (hitSolidPixel) break;
       }
+
+      console.log(`Collision summary: ${totalPixelsChecked} pixels checked, ${solidPixelsFound} solid, ${overlappingPixels} overlapping, hitSolid: ${hitSolidPixel}`);
 
       if (hitSolidPixel) {
         state.ballVelX = -state.ballVelX;
@@ -489,8 +587,10 @@ const PongGame: React.FC = () => {
         isBlinkVisible: true,
       };
 
-      // Reset CPU paddle pixels
+      // Reset CPU paddle pixels and health
       cpuPaddlePixelsRef.current = initializeCpuPaddle();
+      cpuPaddleHealthRef.current = 5;
+      cpuPaddleEdgesRef.current = { topPixelsRemoved: 0, bottomPixelsRemoved: 0 };
 
       // Clear all bullets
       bulletsRef.current = [];
@@ -578,8 +678,10 @@ const PongGame: React.FC = () => {
 
   useEffect(() => {
     soundRef.current = new SoundGenerator();
-    // Initialize CPU paddle pixels on component mount
+    // Initialize CPU paddle pixels and health on component mount
     cpuPaddlePixelsRef.current = initializeCpuPaddle();
+    cpuPaddleHealthRef.current = 5;
+    cpuPaddleEdgesRef.current = { topPixelsRemoved: 0, bottomPixelsRemoved: 0 };
     draw();
 
     return () => {
