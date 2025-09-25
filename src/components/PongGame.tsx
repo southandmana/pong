@@ -107,18 +107,6 @@ const PongGame: React.FC = () => {
     // Draw ball with terminal green
     ctx.fillRect(state.ballX, state.ballY, BALL_SIZE, BALL_SIZE);
 
-    // Draw health bars with terminal green monospace font
-    ctx.font = '24px "Courier New", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#00ff00';
-
-    // Left player health bar
-    const leftHealthBar = createHealthBar(state.leftHealth);
-    ctx.fillText(leftHealthBar, CANVAS_WIDTH / 4, 40);
-
-    // Right player health bar
-    const rightHealthBar = createHealthBar(state.rightHealth);
-    ctx.fillText(rightHealthBar, (3 * CANVAS_WIDTH) / 4, 40);
   }, []);
 
   const updateGame = useCallback(() => {
@@ -281,7 +269,39 @@ const PongGame: React.FC = () => {
 
   const startGame = () => {
     if (gameOver) {
-      resetGame();
+      // Reset game state for new game
+      if (gameLoopRef.current) {
+        cancelAnimationFrame(gameLoopRef.current);
+      }
+
+      gameStateRef.current = {
+        ballX: CANVAS_WIDTH / 2,
+        ballY: CANVAS_HEIGHT / 2,
+        ballVelX: BASE_BALL_SPEED,
+        ballVelY: 3,
+        prevBallX: CANVAS_WIDTH / 2,
+        leftPaddleY: 250,
+        rightPaddleY: 250,
+        leftHealth: 100,
+        rightHealth: 100,
+        isRunning: true,
+        currentSpeedMultiplier: 1.0,
+      };
+
+      // Reset AI state
+      aiStateRef.current = {
+        targetY: 250,
+        lastBallDirection: 0,
+        frameCounter: 0,
+      };
+
+      setIsRunning(true);
+      setLeftHealth(100);
+      setRightHealth(100);
+      setGameOver(false);
+      setWinner(null);
+      soundRef.current?.gameStart();
+      gameLoopRef.current = requestAnimationFrame(gameLoop);
       return;
     }
 
@@ -300,41 +320,6 @@ const PongGame: React.FC = () => {
     }
   };
 
-  const resetGame = () => {
-    if (gameLoopRef.current) {
-      cancelAnimationFrame(gameLoopRef.current);
-    }
-
-    gameStateRef.current = {
-      ballX: CANVAS_WIDTH / 2,
-      ballY: CANVAS_HEIGHT / 2,
-      ballVelX: BASE_BALL_SPEED,
-      ballVelY: 3,
-      prevBallX: CANVAS_WIDTH / 2,
-      leftPaddleY: 250,
-      rightPaddleY: 250,
-      leftHealth: 100,
-      rightHealth: 100,
-      isRunning: false,
-      currentSpeedMultiplier: 1.0,
-    };
-
-    // Reset AI state
-    aiStateRef.current = {
-      targetY: 250,
-      lastBallDirection: 0,
-      frameCounter: 0,
-    };
-
-    setIsRunning(false);
-    setLeftHealth(100);
-    setRightHealth(100);
-    setGameOver(false);
-    setWinner(null);
-    soundRef.current?.gameReset();
-    draw();
-  };
-
   const toggleSound = () => {
     if (soundRef.current) {
       const newState = soundRef.current.toggleSound();
@@ -346,11 +331,13 @@ const PongGame: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       keysRef.current[e.key] = true;
 
-      // Handle pause with spacebar (only prevent default for spacebar)
-      if (e.key === ' ') {
+      // Handle pause/unpause/start with Enter key
+      if (e.key === 'Enter') {
         e.preventDefault();
         if (isRunning) {
           pauseGame();
+        } else {
+          startGame(); // Handles both game over restart and normal start/unpause
         }
       }
     };
@@ -381,11 +368,18 @@ const PongGame: React.FC = () => {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-black font-mono scanlines">
-      <div className="mb-8 text-center">
-        <h1 className="text-5xl font-bold text-green-400 mb-6 tracking-wider terminal-glow">
-          █ PONG.EXE █
-        </h1>
-      </div>
+
+      {/* Health bars above game canvas - hide during overlays */}
+      {isRunning && (
+        <div className="flex justify-between w-full max-w-[800px] mb-4 text-green-400 font-mono text-lg">
+          <div className="text-left">
+            PLAYER: {createHealthBar(leftHealth)}
+          </div>
+          <div className="text-right">
+            CPU: {createHealthBar(rightHealth)}
+          </div>
+        </div>
+      )}
 
       <div className="relative">
         <canvas
@@ -403,14 +397,11 @@ const PongGame: React.FC = () => {
         {gameOver && (
           <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center">
             <div className="text-center text-green-400 font-mono">
-              <div className="text-6xl font-bold mb-4 terminal-glow animate-pulse">
-                █ GAME OVER █
+              <div className="text-6xl font-bold mb-4 terminal-glow">
+                GAME OVER
               </div>
-              <div className="text-3xl mb-6">
-                {winner} WINS!
-              </div>
-              <div className="text-lg text-green-300">
-                Press START to play again
+              <div className="text-lg text-green-300 animate-pulse">
+                Press ENTER to play again
               </div>
             </div>
           </div>
@@ -419,34 +410,28 @@ const PongGame: React.FC = () => {
         {!isRunning && !gameOver && (
           <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center">
             <div className="text-center text-green-400 font-mono">
-              <div className="text-4xl font-bold mb-8 terminal-glow">
-                █ PAUSED █
+              <div className="text-4xl font-bold mb-4 terminal-glow">
+                PAUSED
               </div>
-              <div className="flex gap-3 justify-center">
-                <button
-                  onClick={startGame}
-                  className="px-3 py-2 bg-black text-green-400 border border-green-400 font-mono text-sm hover:bg-green-400 hover:text-black transition-all"
-                >
-                  [ START ]
-                </button>
-                <button
-                  onClick={resetGame}
-                  className="px-3 py-2 bg-black text-green-400 border border-green-400 font-mono text-sm hover:bg-green-400 hover:text-black transition-all"
-                >
-                  [ RESET ]
-                </button>
-                <button
-                  onClick={toggleSound}
-                  className="px-3 py-2 bg-black text-green-400 border border-green-400 font-mono text-sm hover:bg-green-400 hover:text-black transition-all"
-                >
-                  [ SOUND: {soundEnabled ? 'ON' : 'OFF'} ]
-                </button>
+              <div className="text-lg text-green-300 animate-pulse">
+                Press ENTER to continue
               </div>
             </div>
           </div>
         )}
       </div>
 
+      {/* Sound toggle - hide during overlays */}
+      {isRunning && (
+        <div className="mt-6 text-green-400 text-center font-mono">
+          <button
+            onClick={toggleSound}
+            className="px-3 py-2 bg-black text-green-400 border border-green-400 font-mono text-sm hover:bg-green-400 hover:text-black transition-all"
+          >
+            [ SOUND: {soundEnabled ? 'ON' : 'OFF'} ]
+          </button>
+        </div>
+      )}
 
     </div>
   );
