@@ -974,7 +974,7 @@ const PongGame: React.FC = () => {
 
     // Character state
     const characterRef = useRef({
-      x: 25,
+      x: 100, // Start further in the world
       y: 125,
       width: 24,
       height: 24,
@@ -986,6 +986,14 @@ const PongGame: React.FC = () => {
       currentFrame: 0,
       frameTimer: 0,
       isRunning: false,
+    });
+
+    // Camera state
+    const cameraRef = useRef({
+      x: 0,
+      y: 0,
+      targetX: 0,
+      targetY: 0,
     });
 
     // Sprite animation data
@@ -1089,9 +1097,21 @@ const PongGame: React.FC = () => {
           }
         }
 
-        // Keep character on screen (adjusted for zoom)
-        if (character.x < 0) character.x = 0;
-        if (character.x > (canvas.width / 4) - character.width) character.x = (canvas.width / 4) - character.width;
+        // Update camera to follow character
+        const cameraState = cameraRef.current;
+        const screenCenterX = (canvas.width / 4) / 2;
+        const screenCenterY = (canvas.height / 4) / 2;
+
+        // Set camera target to center character on screen
+        cameraState.targetX = character.x + character.width / 2 - screenCenterX;
+        cameraState.targetY = character.y + character.height / 2 - screenCenterY;
+
+        // Smooth camera movement (lerp)
+        const lerpFactor = 0.1;
+        cameraState.x += (cameraState.targetX - cameraState.x) * lerpFactor;
+        cameraState.y += (cameraState.targetY - cameraState.y) * lerpFactor;
+
+        // No screen boundaries for character - they can move freely in world space
 
         // Update animation
         if (character.currentAnimation !== newAnimation) {
@@ -1113,19 +1133,29 @@ const PongGame: React.FC = () => {
         ctx.save();
         ctx.scale(4, 4); // 4x zoom for crisp pixel art
 
+        const currentCamera = cameraRef.current;
+
         // Clear canvas (accounting for zoom)
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, canvas.width / 4, canvas.height / 4);
 
-        // Draw ground (accounting for zoom)
+        // Draw extended ground (world coordinates converted to screen)
         ctx.fillStyle = '#00ff00';
-        ctx.fillRect(0, (canvas.height / 4) - 12.5, canvas.width / 4, 12.5);
+        const groundWorldY = (canvas.height / 4) - 12.5;
+        const groundScreenX = 0 - currentCamera.x;
+        const groundScreenY = groundWorldY - currentCamera.y;
+        // Draw ground much wider than screen
+        ctx.fillRect(groundScreenX - 1000, groundScreenY, 2000, 12.5);
 
-        // Draw character sprite
+        // Draw character sprite (convert world coordinates to screen coordinates)
         if (spriteImage.complete) {
           const anim = animations[character.currentAnimation];
           const sourceX = (anim.startCol + character.currentFrame) * 24;
           const sourceY = anim.row * 24;
+
+          // Convert character world position to screen position
+          const characterScreenX = character.x - currentCamera.x;
+          const characterScreenY = character.y - currentCamera.y;
 
           ctx.save();
           if (!character.facingRight) {
@@ -1133,13 +1163,13 @@ const PongGame: React.FC = () => {
             ctx.drawImage(
               spriteImage,
               sourceX, sourceY, 24, 24,
-              -(character.x + character.width), character.y, character.width, character.height
+              -(characterScreenX + character.width), characterScreenY, character.width, character.height
             );
           } else {
             ctx.drawImage(
               spriteImage,
               sourceX, sourceY, 24, 24,
-              character.x, character.y, character.width, character.height
+              characterScreenX, characterScreenY, character.width, character.height
             );
           }
           ctx.restore();
