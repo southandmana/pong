@@ -1088,7 +1088,7 @@ const PongGame: React.FC = () => {
       // Define level platforms - single long continuous platform + left wall
       const platforms = [
         // One long platform spanning the entire level, positioned right under character's starting position
-        { type: 'rect', x: -150, y: 149, width: 4000, height: 20 },
+        { type: 'rect', x: -150, y: 149, width: 3000, height: 20 },
         // Vertical wall at left end of platform - too high to jump over
         { type: 'rect', x: -150, y: 69, width: 20, height: 80 }
       ];
@@ -1305,9 +1305,9 @@ const PongGame: React.FC = () => {
           const scaledWidth = bgWidth * scale;
           const scaledHeight = screenHeight;
 
-          // Draw repeating background tiles to cover the screen (using scaled width)
-          const startX = Math.floor(-bgScrollX / scaledWidth) - 1;
-          const endX = Math.ceil((screenWidth - bgScrollX) / scaledWidth) + 1;
+          // Draw repeating background tiles to cover the screen (using scaled width) - extended buffer
+          const startX = Math.floor(-bgScrollX / scaledWidth) - 3;
+          const endX = Math.ceil((screenWidth - bgScrollX) / scaledWidth) + 3;
 
           for (let x = startX; x <= endX; x++) {
             const drawX = x * scaledWidth - (bgScrollX % scaledWidth);
@@ -1406,6 +1406,20 @@ const PongGame: React.FC = () => {
         const redRectHeight = redRectBottomY - redRectTopY; // Height from screen top to bottom
         ctx.fillRect(redRectLeftX, redRectTopY, redRectWidth, redRectHeight); // Rectangle spanning entire left area to collision boundary
 
+        // Draw black rectangle on right side after "have a little dance" text (visual only, no collision)
+        const rightRectLeftX = 1920 + 300 - currentCamera.x; // Start after the dance text with some buffer
+        const rightRectTopY = 0;                             // Top edge of screen
+        const rightRectBottomY = screenHeight;               // Bottom edge of screen
+        const rightRectRightX = screenWidth;                 // Right edge of screen
+
+        // Only draw if the right boundary area is visible on screen
+        if (rightRectLeftX < screenWidth) {
+          ctx.fillStyle = '#000000';
+          const rightRectWidth = rightRectRightX - rightRectLeftX;
+          const rightRectHeight = rightRectBottomY - rightRectTopY;
+          ctx.fillRect(rightRectLeftX, rightRectTopY, rightRectWidth, rightRectHeight); // Rectangle covering right area
+        }
+
         // Draw character sprite (convert world coordinates to screen coordinates)
         if (spriteImage.complete && spriteImage.naturalHeight !== 0) {
           const anim = animations[character.currentAnimation];
@@ -1499,8 +1513,8 @@ const PongGame: React.FC = () => {
 
         ctx.fillText('Hold SHIFT to run faster', controls4ScreenX, controls4ScreenY);
 
-        // Draw fifth controls copy very far from the third text
-        const controls5WorldX = 3500; // Position very far from third text at 2465
+        // Draw fifth controls copy on top of the black rectangle
+        const controls5WorldX = 2300; // Position on top of the black rectangle we just created
         const controls5WorldY = 20; // Same Y position
         const controls5ScreenX = controls5WorldX - cameraState.x;
         const controls5ScreenY = controls5WorldY - cameraState.y;
