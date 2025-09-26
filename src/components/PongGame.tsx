@@ -1017,6 +1017,45 @@ const PongGame: React.FC = () => {
     // Input handling
     const keysRef = useRef<{[key: string]: boolean}>({});
 
+    // Background music state
+    const backgroundMusicRef = useRef<HTMLAudioElement | null>(null);
+    const introMusicRef = useRef<HTMLAudioElement | null>(null);
+    const musicStartedRef = useRef<boolean>(false);
+    const introMusicStartedRef = useRef<boolean>(false);
+
+    // Auto-run state
+    const autoRunStartedRef = useRef<boolean>(false);
+    const autoRunStoppedRef = useRef<boolean>(false);
+
+    // Cinematic text sequence state
+    const cinematicTextRef = useRef({
+      startTime: 0,
+      currentPhase: -1,
+      isActive: false
+    });
+
+    // Fade-in effect state
+    const fadeInRef = useRef({
+      startTime: 0,
+      isActive: true
+    });
+
+    // Camera scroll and menu transition state
+    const endSequenceRef = useRef({
+      scrollStarted: false,
+      scrollStartTime: 0,
+      fadeStarted: false,
+      fadeStartTime: 0,
+      initialCameraY: 0
+    });
+
+    // Step sound timing state
+    const stepSoundRef = useRef({
+      lastStepTime: 0,
+      isMoving: false,
+      wasMoving: false
+    });
+
     useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
         keysRef.current[e.key] = true;
@@ -1087,11 +1126,40 @@ const PongGame: React.FC = () => {
 
       // Define level platforms - single long continuous platform + left wall
       const platforms = [
-        // One long platform spanning the entire level, positioned right under character's starting position
-        { type: 'rect', x: -150, y: 149, width: 3000, height: 20 },
+        // One very long platform spanning the entire level, positioned right under character's starting position
+        { type: 'rect', x: -150, y: 149, width: 10000, height: 20 },
         // Vertical wall at left end of platform - too high to jump over
         { type: 'rect', x: -150, y: 69, width: 20, height: 80 }
       ];
+
+      // Initialize fade-in start time
+      fadeInRef.current.startTime = Date.now();
+
+      // Start intro music with fade-in
+      if (!introMusicStartedRef.current) {
+        introMusicStartedRef.current = true;
+
+        // Initialize intro music
+        if (!introMusicRef.current) {
+          introMusicRef.current = new Audio('/intro-music.wav'); // You'll need to add this file
+          introMusicRef.current.loop = true;
+          introMusicRef.current.volume = 0; // Start at 0 volume for fade-in
+        }
+
+        // Play and fade in intro music
+        introMusicRef.current.play().catch(error => {
+          console.log('Could not play intro music:', error);
+        });
+
+        // Fade in intro music over 2 seconds
+        const fadeInInterval = setInterval(() => {
+          if (introMusicRef.current && introMusicRef.current.volume < 0.3) {
+            introMusicRef.current.volume = Math.min(0.3, introMusicRef.current.volume + 0.02);
+          } else {
+            clearInterval(fadeInInterval);
+          }
+        }, 100);
+      }
 
       const gameLoop = () => {
         const character = characterRef.current;
@@ -1101,15 +1169,27 @@ const PongGame: React.FC = () => {
         let newVelocityX = 0;
         let newAnimation: keyof typeof animations = 'idle';
 
-        // Horizontal movement (adjusted speeds for zoom)
-        if (keys['ArrowLeft']) {
-          newVelocityX = keys['Shift'] ? -2.5 : -1.5;
-          character.facingRight = false;
-          newAnimation = keys['Shift'] ? 'run' : 'walk';
-        } else if (keys['ArrowRight']) {
-          newVelocityX = keys['Shift'] ? 2.5 : 1.5;
+        // Check if auto-run is active and not stopped
+        if (autoRunStartedRef.current && !autoRunStoppedRef.current) {
+          // Force character to run right - player input is ignored
+          newVelocityX = 2.5; // Run speed
           character.facingRight = true;
-          newAnimation = keys['Shift'] ? 'run' : 'walk';
+          newAnimation = 'run';
+        } else if (autoRunStartedRef.current && autoRunStoppedRef.current) {
+          // Auto-run stopped - character stands still, player input still ignored
+          newVelocityX = 0;
+          newAnimation = 'idle';
+        } else {
+          // Normal player-controlled movement
+          if (keys['ArrowLeft']) {
+            newVelocityX = keys['Shift'] ? -2.5 : -1.5;
+            character.facingRight = false;
+            newAnimation = keys['Shift'] ? 'run' : 'walk';
+          } else if (keys['ArrowRight']) {
+            newVelocityX = keys['Shift'] ? 2.5 : 1.5;
+            character.facingRight = true;
+            newAnimation = keys['Shift'] ? 'run' : 'walk';
+          }
         }
 
         // Attack actions
@@ -1129,6 +1209,30 @@ const PongGame: React.FC = () => {
         // Apply physics (adjusted gravity for zoom)
         character.velocityX = newVelocityX;
         character.velocityY += 0.3; // gravity
+
+        // Handle step sound effects
+        const stepSound = stepSoundRef.current;
+        const currentTime = Date.now();
+        const isMoving = Math.abs(newVelocityX) > 0 && character.grounded;
+        const isRunning = Math.abs(newVelocityX) >= 2.5; // Run speed threshold
+
+        stepSound.isMoving = isMoving;
+
+        if (isMoving && character.grounded) {
+          // Calculate step timing based on movement speed
+          const stepInterval = isRunning ? 125 : 200; // Running: 125ms (twice as fast), Walking: 200ms between steps
+
+          if (currentTime - stepSound.lastStepTime > stepInterval) {
+            if (isRunning) {
+              soundRef.current?.runStep();
+            } else {
+              soundRef.current?.walkStep();
+            }
+            stepSound.lastStepTime = currentTime;
+          }
+        }
+
+        stepSound.wasMoving = isMoving;
 
         // Simple wall blocking - prevent movement into left wall area
         const nextX = character.x + character.velocityX;
@@ -1267,25 +1371,75 @@ const PongGame: React.FC = () => {
         const screenHeight = canvas.height / 2;
         const groundThickness = 20; // Fixed thin ground platform
 
-        // Update camera to follow character
+        // Update camera to follow character or handle end sequence
         const cameraState = cameraRef.current;
         const screenCenterX = screenWidth / 2;
+        const endSequence = endSequenceRef.current;
 
-        // Set camera target to follow character horizontally only - vertically locked
-        cameraState.targetX = character.x + character.width / 2 - screenCenterX;
-        // cameraState.targetY stays unchanged - vertically locked
+        if (endSequence.scrollStarted) {
+          const currentTime = Date.now();
+          const scrollElapsed = currentTime - endSequence.scrollStartTime;
+          const scrollDuration = 3000; // 3 seconds
 
+          if (scrollElapsed < scrollDuration) {
+            // Smooth upward scroll over 3 seconds
+            const scrollProgress = scrollElapsed / scrollDuration;
+            const easeProgress = 1 - Math.pow(1 - scrollProgress, 3); // Ease out cubic
+            cameraState.targetY = endSequence.initialCameraY - (200 * easeProgress); // Scroll up 200 pixels
+            cameraState.targetX = character.x + character.width / 2 - screenCenterX; // Still follow character horizontally
+          } else if (!endSequence.fadeStarted) {
+            // Start fade after scroll completes
+            endSequence.fadeStarted = true;
+            endSequence.fadeStartTime = currentTime;
+          }
 
-        // Smooth camera movement (lerp)
-        const lerpFactor = 0.1;
-        cameraState.x += (cameraState.targetX - cameraState.x) * lerpFactor;
-        cameraState.y += (cameraState.targetY - cameraState.y) * lerpFactor;
+          // Smooth camera movement during scroll
+          const lerpFactor = 0.05; // Slower lerp for smoother scroll
+          cameraState.x += (cameraState.targetX - cameraState.x) * lerpFactor;
+          cameraState.y += (cameraState.targetY - cameraState.y) * lerpFactor;
+        } else {
+          // Normal camera following
+          // Set camera target to follow character horizontally only - vertically locked
+          cameraState.targetX = character.x + character.width / 2 - screenCenterX;
+          // cameraState.targetY stays unchanged - vertically locked
+
+          // Smooth camera movement (lerp)
+          const lerpFactor = 0.1;
+          cameraState.x += (cameraState.targetX - cameraState.x) * lerpFactor;
+          cameraState.y += (cameraState.targetY - cameraState.y) * lerpFactor;
+        }
 
         // Check if character fell off screen (death condition)
         const cameraBottomY = cameraState.y + screenHeight;
         if (character.y > cameraBottomY + 100) { // 100px buffer below camera view
           setGameOver(true);
           return; // Stop the game loop
+        }
+
+        // Check if character passed the "Goodluck :)" text point and start background music & auto-run
+        const characterCenterX = character.x + character.width / 2;
+        if (characterCenterX >= 2300 && !musicStartedRef.current) {
+          musicStartedRef.current = true;
+          autoRunStartedRef.current = true;
+
+          // Initialize and play background music at full volume (no fade-in)
+          if (!backgroundMusicRef.current) {
+            backgroundMusicRef.current = new Audio('/background-music.mp3'); // You'll need to add this file
+            backgroundMusicRef.current.loop = true;
+            backgroundMusicRef.current.volume = 0.4; // Start at full volume (no fade-in)
+          }
+
+          // Play main music immediately at full volume
+          backgroundMusicRef.current.play().catch(error => {
+            console.log('Could not play background music:', error);
+          });
+
+          // Start cinematic text sequence 2 seconds after music starts
+          setTimeout(() => {
+            cinematicTextRef.current.startTime = Date.now();
+            cinematicTextRef.current.isActive = true;
+            cinematicTextRef.current.currentPhase = 0;
+          }, 2000);
         }
 
         // Draw looping background
@@ -1406,18 +1560,133 @@ const PongGame: React.FC = () => {
         const redRectHeight = redRectBottomY - redRectTopY; // Height from screen top to bottom
         ctx.fillRect(redRectLeftX, redRectTopY, redRectWidth, redRectHeight); // Rectangle spanning entire left area to collision boundary
 
-        // Draw black rectangle on right side after "have a little dance" text (visual only, no collision)
+        // Draw black rectangle on right side extending to match platform length
         const rightRectLeftX = 1920 + 300 - currentCamera.x; // Start after the dance text with some buffer
         const rightRectTopY = 0;                             // Top edge of screen
         const rightRectBottomY = screenHeight;               // Bottom edge of screen
-        const rightRectRightX = screenWidth;                 // Right edge of screen
+        const rightRectRightX = 9850 - currentCamera.x;      // Extend to match platform end (10000 - 150)
 
         // Only draw if the right boundary area is visible on screen
-        if (rightRectLeftX < screenWidth) {
+        if (rightRectLeftX < screenWidth && rightRectRightX > 0) {
           ctx.fillStyle = '#000000';
-          const rightRectWidth = rightRectRightX - rightRectLeftX;
+          const rightRectWidth = Math.min(rightRectRightX - rightRectLeftX, screenWidth - rightRectLeftX);
           const rightRectHeight = rightRectBottomY - rightRectTopY;
-          ctx.fillRect(rightRectLeftX, rightRectTopY, rightRectWidth, rightRectHeight); // Rectangle covering right area
+          if (rightRectWidth > 0) {
+            ctx.fillRect(Math.max(rightRectLeftX, 0), rightRectTopY, rightRectWidth, rightRectHeight); // Rectangle covering right area
+          }
+        }
+
+        // Draw cinematic text sequence
+        if (cinematicTextRef.current.isActive) {
+          const currentTime = Date.now();
+          const elapsed = currentTime - cinematicTextRef.current.startTime;
+
+          // Define text phases with timing (fade in: 1s, hold: 3s, fade out: 1s = 5s per phase)
+          const textPhases = [
+            "Southie Games Presents",
+            "A Next.js framework, Tailwind styled, nano banana art asset generated, Claude.ai consulted, Claude Code developed web app",
+            "Made with authenticity",
+            "Built for the people",
+            "To save the world",
+            "Today"
+          ];
+
+          const currentPhase = cinematicTextRef.current.currentPhase;
+          const phaseTime = elapsed - (currentPhase * 5000);
+
+          // Stop auto-run when we reach the "Today" phase (phase 5)
+          if (currentPhase === 5 && !autoRunStoppedRef.current) {
+            autoRunStoppedRef.current = true;
+          }
+
+          if (currentPhase < textPhases.length && phaseTime >= 0) {
+            let opacity = 0;
+
+            // Calculate opacity based on phase timing
+            if (phaseTime < 1000) {
+              // Fade in (0-1s)
+              opacity = phaseTime / 1000;
+            } else if (phaseTime < 4000) {
+              // Hold (1-4s)
+              opacity = 1;
+            } else if (phaseTime < 5000) {
+              // Fade out (4-5s)
+              opacity = 1 - ((phaseTime - 4000) / 1000);
+            } else {
+              // Move to next phase
+              cinematicTextRef.current.currentPhase++;
+              if (cinematicTextRef.current.currentPhase >= textPhases.length) {
+                cinematicTextRef.current.isActive = false;
+                // Start camera scroll sequence when all text is done
+                if (!endSequenceRef.current.scrollStarted) {
+                  endSequenceRef.current.scrollStarted = true;
+                  endSequenceRef.current.scrollStartTime = Date.now();
+                  endSequenceRef.current.initialCameraY = cameraRef.current.y;
+                }
+              }
+            }
+
+            if (opacity > 0) {
+              // Draw text centered on screen with wrapping
+              ctx.save();
+              ctx.globalAlpha = opacity;
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+
+              const text = textPhases[currentPhase];
+              const fontSize = text.length > 80 ? 10 : text.length > 50 ? 12 : 16;
+              ctx.font = `${fontSize}px monospace`;
+
+              const centerX = screenWidth / 2;
+              const centerY = screenHeight / 2;
+              const maxWidth = screenWidth * 0.9; // Use 90% of screen width
+              const lineHeight = fontSize * 1.4;
+
+              // Split text into lines that fit within maxWidth
+              const words = text.split(' ');
+              const lines: string[] = [];
+              let currentLine = '';
+
+              for (const word of words) {
+                const testLine = currentLine ? `${currentLine} ${word}` : word;
+                const metrics = ctx.measureText(testLine);
+
+                if (metrics.width <= maxWidth) {
+                  currentLine = testLine;
+                } else {
+                  if (currentLine) {
+                    lines.push(currentLine);
+                    currentLine = word;
+                  } else {
+                    // Single word is too long, just add it anyway
+                    lines.push(word);
+                  }
+                }
+              }
+              if (currentLine) {
+                lines.push(currentLine);
+              }
+
+              // Calculate starting Y position to center all lines
+              const totalHeight = lines.length * lineHeight;
+              const startY = centerY - (totalHeight / 2) + (lineHeight / 2);
+
+              // Draw each line with shadow
+              lines.forEach((line, index) => {
+                const lineY = startY + (index * lineHeight);
+
+                // Draw shadow
+                ctx.fillStyle = '#000000';
+                ctx.fillText(line, centerX + 1, lineY + 1);
+
+                // Draw main text
+                ctx.fillStyle = '#00ff00';
+                ctx.fillText(line, centerX, lineY);
+              });
+
+              ctx.restore();
+            }
+          }
         }
 
         // Draw character sprite (convert world coordinates to screen coordinates)
@@ -1455,8 +1724,7 @@ const PongGame: React.FC = () => {
         const controlsScreenX = controlsWorldX - cameraState.x;
         const controlsScreenY = controlsWorldY - cameraState.y;
 
-        // Calculate horizontal distance-based opacity
-        const characterCenterX = character.x + character.width / 2;
+        // Calculate horizontal distance-based opacity (reuse characterCenterX from above)
         const horizontalDistance = Math.abs(characterCenterX - controlsWorldX);
 
         // Opacity decreases with horizontal distance (max distance ~200px for full fade)
@@ -1474,7 +1742,7 @@ const PongGame: React.FC = () => {
         const controls2ScreenX = controls2WorldX - cameraState.x;
         const controls2ScreenY = controls2WorldY - cameraState.y;
 
-        // Calculate horizontal distance-based opacity for second controls
+        // Calculate horizontal distance-based opacity for second controls (reuse characterCenterX)
         const horizontalDistance2 = Math.abs(characterCenterX - controls2WorldX);
         const opacity2 = Math.max(0.1, 1 - (horizontalDistance2 / maxDistance));
 
@@ -1489,7 +1757,7 @@ const PongGame: React.FC = () => {
         const controls3ScreenX = controls3WorldX - cameraState.x;
         const controls3ScreenY = controls3WorldY - cameraState.y;
 
-        // Calculate horizontal distance-based opacity for third controls
+        // Calculate horizontal distance-based opacity for third controls (reuse characterCenterX)
         const horizontalDistance3 = Math.abs(characterCenterX - controls3WorldX);
         const opacity3 = Math.max(0.1, 1 - (horizontalDistance3 / maxDistance));
 
@@ -1504,7 +1772,7 @@ const PongGame: React.FC = () => {
         const controls4ScreenX = controls4WorldX - cameraState.x;
         const controls4ScreenY = controls4WorldY - cameraState.y;
 
-        // Calculate horizontal distance-based opacity for fourth controls
+        // Calculate horizontal distance-based opacity for fourth controls (reuse characterCenterX)
         const horizontalDistance4 = Math.abs(characterCenterX - controls4WorldX);
         const opacity4 = Math.max(0.1, 1 - (horizontalDistance4 / maxDistance));
 
@@ -1519,19 +1787,57 @@ const PongGame: React.FC = () => {
         const controls5ScreenX = controls5WorldX - cameraState.x;
         const controls5ScreenY = controls5WorldY - cameraState.y;
 
-        // Calculate horizontal distance-based opacity for fifth controls
+        // Calculate horizontal distance-based opacity for fifth controls (reuse characterCenterX)
         const horizontalDistance5 = Math.abs(characterCenterX - controls5WorldX);
         const opacity5 = Math.max(0.1, 1 - (horizontalDistance5 / maxDistance));
 
         ctx.font = '8px monospace'; // Same size as menu buttons
         ctx.fillStyle = `rgba(0, 255, 0, ${opacity5})`;
 
-        ctx.fillText('Controls:', controls5ScreenX, controls5ScreenY);
-        ctx.fillText('← → : Move', controls5ScreenX, controls5ScreenY + 15);
-        ctx.fillText('Shift: Run', controls5ScreenX, controls5ScreenY + 30);
-        ctx.fillText('Space: Jump', controls5ScreenX, controls5ScreenY + 45);
-        ctx.fillText('Z: Attack', controls5ScreenX, controls5ScreenY + 60);
-        ctx.fillText('X: Kick', controls5ScreenX, controls5ScreenY + 75);
+        ctx.fillText('Goodluck :)', controls5ScreenX, controls5ScreenY);
+
+        // Draw fade-in overlay (from black to transparent)
+        if (fadeInRef.current.isActive) {
+          const currentTime = Date.now();
+          const elapsed = currentTime - fadeInRef.current.startTime;
+          const fadeDuration = 3000; // 3 second fade-in
+
+          if (elapsed < fadeDuration) {
+            // Calculate fade opacity (starts at 1.0 black, fades to 0.0 transparent)
+            const fadeOpacity = 1.0 - (elapsed / fadeDuration);
+
+            ctx.save();
+            ctx.globalAlpha = fadeOpacity;
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, screenWidth, screenHeight);
+            ctx.restore();
+          } else {
+            // Fade-in complete
+            fadeInRef.current.isActive = false;
+          }
+        }
+
+        // Draw fade-out to menu (after camera scroll completes)
+        if (endSequenceRef.current.fadeStarted) {
+          const currentTime = Date.now();
+          const fadeElapsed = currentTime - endSequenceRef.current.fadeStartTime;
+          const fadeDuration = 2000; // 2 second fade to black
+
+          if (fadeElapsed < fadeDuration) {
+            // Calculate fade opacity (starts at 0.0 transparent, fades to 1.0 black)
+            const fadeOpacity = fadeElapsed / fadeDuration;
+
+            ctx.save();
+            ctx.globalAlpha = fadeOpacity;
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, screenWidth, screenHeight);
+            ctx.restore();
+          } else {
+            // Fade complete - transition to main menu
+            setCurrentScreen('menu');
+            return;
+          }
+        }
 
         // Restore canvas transform
         ctx.restore();
@@ -1548,6 +1854,40 @@ const PongGame: React.FC = () => {
         if (platformerLoopRef.current) {
           cancelAnimationFrame(platformerLoopRef.current);
         }
+        // Stop both music tracks when component unmounts or restarts
+        if (backgroundMusicRef.current) {
+          backgroundMusicRef.current.pause();
+          backgroundMusicRef.current = null;
+        }
+        if (introMusicRef.current) {
+          introMusicRef.current.pause();
+          introMusicRef.current = null;
+        }
+        musicStartedRef.current = false;
+        introMusicStartedRef.current = false;
+        autoRunStartedRef.current = false;
+        autoRunStoppedRef.current = false;
+        cinematicTextRef.current = {
+          startTime: 0,
+          currentPhase: -1,
+          isActive: false
+        };
+        fadeInRef.current = {
+          startTime: 0,
+          isActive: true
+        };
+        stepSoundRef.current = {
+          lastStepTime: 0,
+          isMoving: false,
+          wasMoving: false
+        };
+        endSequenceRef.current = {
+          scrollStarted: false,
+          scrollStartTime: 0,
+          fadeStarted: false,
+          fadeStartTime: 0,
+          initialCameraY: 0
+        };
       };
     }, [gameOver, restartKey]);
 

@@ -129,6 +129,18 @@ class SoundGenerator {
     this.createBeep(600, 0.03, 0.06, 'sine');
   };
 
+  walkStep = () => {
+    // Walking step sound - soft thump
+    this.createBeep(120, 0.08, 0.08, 'triangle');
+    setTimeout(() => this.createBeep(100, 0.06, 0.06, 'triangle'), 20);
+  };
+
+  runStep = () => {
+    // Running step sound - faster, slightly higher pitched version of walk
+    this.createBeep(140, 0.06, 0.09, 'triangle');
+    setTimeout(() => this.createBeep(115, 0.04, 0.07, 'triangle'), 15);
+  };
+
   toggleSound = () => {
     this.isEnabled = !this.isEnabled;
     return this.isEnabled;
