@@ -17,7 +17,7 @@ interface GameState {
   currentSpeedMultiplier: number;
 }
 
-type Screen = 'menu' | 'game' | 'play' | 'settings' | 'online';
+type Screen = 'menu' | 'game' | 'play' | 'settings' | 'online' | 'more';
 
 const PongGame: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<Screen>('menu');
@@ -36,6 +36,10 @@ const PongGame: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameLoopRef = useRef<number>();
   const soundRef = useRef<SoundGenerator | null>(null);
+
+  // Global music refs - persist across screen transitions
+  const globalBackgroundMusicRef = useRef<HTMLAudioElement | null>(null);
+  const globalIntroMusicRef = useRef<HTMLAudioElement | null>(null);
 
   // Use ref for performance-critical game state
   const gameStateRef = useRef<GameState>({
@@ -878,11 +882,95 @@ const PongGame: React.FC = () => {
       if (gameLoopRef.current) {
         cancelAnimationFrame(gameLoopRef.current);
       }
+      // Cleanup global music when entire PongGame component unmounts
+      if (globalBackgroundMusicRef.current) {
+        globalBackgroundMusicRef.current.pause();
+        globalBackgroundMusicRef.current = null;
+      }
+      if (globalIntroMusicRef.current) {
+        globalIntroMusicRef.current.pause();
+        globalIntroMusicRef.current = null;
+      }
     };
   }, [draw]);
 
   // Main Menu Component
   const MainMenu = () => (
+    <div className="relative flex flex-col items-center justify-center min-h-screen font-mono text-green-400 overflow-hidden">
+      {/* Background Image */}
+      <img
+        src="/images/menu/background.png"
+        alt="Synthwave Background"
+        className="absolute inset-0 w-full h-full object-cover z-0"
+      />
+      {/* Content overlay */}
+      <div className="relative z-10 text-center space-y-8">
+        {/* Title Image */}
+        <div className="text-center mb-20">
+          <img
+            src="/images/menu/title.png"
+            alt="PONGY MAN"
+            className="mx-auto"
+            style={{ height: '80px', objectFit: 'contain' }}
+          />
+        </div>
+
+        {/* Menu Options */}
+        <div className="space-y-6 text-2xl">
+          <button
+            onClick={() => {
+              soundRef.current?.menuClick();
+              setCurrentScreen('play');
+            }}
+            onMouseEnter={() => soundRef.current?.menuHover()}
+            className="block mx-auto transition-transform duration-200 hover:scale-105 hover:brightness-110"
+          >
+            <img
+              src="/images/menu/button-play.png"
+              alt="PLAY"
+              className="max-w-full h-auto mx-auto"
+              style={{ width: '300px', height: '80px', objectFit: 'fill' }}
+            />
+          </button>
+
+          <button
+            onClick={() => {
+              soundRef.current?.menuClick();
+              setCurrentScreen('settings');
+            }}
+            onMouseEnter={() => soundRef.current?.menuHover()}
+            className="block mx-auto transition-transform duration-200 hover:scale-105 hover:brightness-110"
+          >
+            <img
+              src="/images/menu/button-settings.png"
+              alt="SETTINGS"
+              className="max-w-full h-auto mx-auto"
+              style={{ width: '300px', height: '80px', objectFit: 'fill' }}
+            />
+          </button>
+
+          <button
+            onClick={() => {
+              soundRef.current?.menuClick();
+              setCurrentScreen('more');
+            }}
+            onMouseEnter={() => soundRef.current?.menuHover()}
+            className="block mx-auto transition-transform duration-200 hover:scale-105 hover:brightness-110"
+          >
+            <img
+              src="/images/menu/button-more.png"
+              alt="MORE"
+              className="max-w-full h-auto mx-auto"
+              style={{ width: '300px', height: '80px', objectFit: 'fill' }}
+            />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // More Screen Component - Same styling as MainMenu
+  const MoreScreen = () => (
     <div className="flex flex-col items-center justify-center min-h-screen bg-black font-mono text-green-400">
       <div className="text-center space-y-8">
         {/* Title - Clean and Simple */}
@@ -894,7 +982,7 @@ const PongGame: React.FC = () => {
             ████████████████████████████████
           </div>
           <div className="text-lg text-green-300">
-            [ DESTRUCTIBLE PADDLE EDITION ]
+            [ MORE OPTIONS ]
           </div>
         </div>
 
@@ -915,17 +1003,6 @@ const PongGame: React.FC = () => {
           <button
             onClick={() => {
               soundRef.current?.menuClick();
-              setCurrentScreen('play');
-            }}
-            onMouseEnter={() => soundRef.current?.menuHover()}
-            className="block w-full px-8 py-4 border-2 border-green-400 bg-black text-green-400 hover:bg-green-400 hover:text-black transition-colors duration-200 font-mono"
-          >
-            [ PLAY ]
-          </button>
-
-          <button
-            onClick={() => {
-              soundRef.current?.menuClick();
               setCurrentScreen('online');
             }}
             onMouseEnter={() => soundRef.current?.menuHover()}
@@ -937,12 +1014,12 @@ const PongGame: React.FC = () => {
           <button
             onClick={() => {
               soundRef.current?.menuClick();
-              setCurrentScreen('settings');
+              setCurrentScreen('menu');
             }}
             onMouseEnter={() => soundRef.current?.menuHover()}
             className="block w-full px-8 py-4 border-2 border-green-400 bg-black text-green-400 hover:bg-green-400 hover:text-black transition-colors duration-200 font-mono"
           >
-            [ SETTINGS ]
+            [ BACK TO MAIN MENU ]
           </button>
         </div>
       </div>
@@ -1018,8 +1095,6 @@ const PongGame: React.FC = () => {
     const keysRef = useRef<{[key: string]: boolean}>({});
 
     // Background music state
-    const backgroundMusicRef = useRef<HTMLAudioElement | null>(null);
-    const introMusicRef = useRef<HTMLAudioElement | null>(null);
     const musicStartedRef = useRef<boolean>(false);
     const introMusicStartedRef = useRef<boolean>(false);
 
@@ -1140,21 +1215,21 @@ const PongGame: React.FC = () => {
         introMusicStartedRef.current = true;
 
         // Initialize intro music
-        if (!introMusicRef.current) {
-          introMusicRef.current = new Audio('/intro-music.wav'); // You'll need to add this file
-          introMusicRef.current.loop = true;
-          introMusicRef.current.volume = 0; // Start at 0 volume for fade-in
+        if (!globalIntroMusicRef.current) {
+          globalIntroMusicRef.current = new Audio('/intro-music.mp3'); // You'll need to add this file
+          globalIntroMusicRef.current.loop = true;
+          globalIntroMusicRef.current.volume = 0; // Start at 0 volume for fade-in
         }
 
         // Play and fade in intro music
-        introMusicRef.current.play().catch(error => {
+        globalIntroMusicRef.current.play().catch(error => {
           console.log('Could not play intro music:', error);
         });
 
         // Fade in intro music over 2 seconds
         const fadeInInterval = setInterval(() => {
-          if (introMusicRef.current && introMusicRef.current.volume < 0.3) {
-            introMusicRef.current.volume = Math.min(0.3, introMusicRef.current.volume + 0.02);
+          if (globalIntroMusicRef.current && globalIntroMusicRef.current.volume < 0.3) {
+            globalIntroMusicRef.current.volume = Math.min(0.3, globalIntroMusicRef.current.volume + 0.02);
           } else {
             clearInterval(fadeInInterval);
           }
@@ -1409,12 +1484,7 @@ const PongGame: React.FC = () => {
           cameraState.y += (cameraState.targetY - cameraState.y) * lerpFactor;
         }
 
-        // Check if character fell off screen (death condition)
-        const cameraBottomY = cameraState.y + screenHeight;
-        if (character.y > cameraBottomY + 100) { // 100px buffer below camera view
-          setGameOver(true);
-          return; // Stop the game loop
-        }
+        // Character can no longer die from falling off screen - death condition removed
 
         // Check if character passed the "Goodluck :)" text point and start background music & auto-run
         const characterCenterX = character.x + character.width / 2;
@@ -1423,14 +1493,14 @@ const PongGame: React.FC = () => {
           autoRunStartedRef.current = true;
 
           // Initialize and play background music at full volume (no fade-in)
-          if (!backgroundMusicRef.current) {
-            backgroundMusicRef.current = new Audio('/background-music.mp3'); // You'll need to add this file
-            backgroundMusicRef.current.loop = true;
-            backgroundMusicRef.current.volume = 0.4; // Start at full volume (no fade-in)
+          if (!globalBackgroundMusicRef.current) {
+            globalBackgroundMusicRef.current = new Audio('/background-music.mp3'); // You'll need to add this file
+            globalBackgroundMusicRef.current.loop = true;
+            globalBackgroundMusicRef.current.volume = 0.4; // Start at full volume (no fade-in)
           }
 
           // Play main music immediately at full volume
-          backgroundMusicRef.current.play().catch(error => {
+          globalBackgroundMusicRef.current.play().catch(error => {
             console.log('Could not play background music:', error);
           });
 
@@ -1471,84 +1541,85 @@ const PongGame: React.FC = () => {
           }
         }
 
-        // Draw all platforms
-        ctx.fillStyle = '#00ff00';
+        // Draw all platforms - COMMENTED OUT TO MAKE PLATFORMS INVISIBLE
+        // Collision detection still works, but platforms are not visually rendered
+        // ctx.fillStyle = '#00ff00';
 
-        for (const platform of platforms) {
-          if (platform.type === 'rect') {
-            // Draw tiled platform using tilemap
-            const screenX = platform.x - currentCamera.x;
-            const screenY = platform.y - currentCamera.y;
+        // for (const platform of platforms) {
+        //   if (platform.type === 'rect') {
+        //     // Draw tiled platform using tilemap
+        //     const screenX = platform.x - currentCamera.x;
+        //     const screenY = platform.y - currentCamera.y;
 
-            // Draw platform with tilemap tiles
-            if (tilemapImage.complete && tilemapImage.naturalHeight !== 0) {
-              const tileSize = 16; // Each tile is 16x16 pixels
+        //     // Draw platform with tilemap tiles
+        //     if (tilemapImage.complete && tilemapImage.naturalHeight !== 0) {
+        //       const tileSize = 16; // Each tile is 16x16 pixels
 
-              // Single consistent tile set - solid black tiles from tilemap
-              const tiles = {
-                topLeft: { x: 272, y: 112 }, topMiddle: { x: 272, y: 112 }, topRight: { x: 272, y: 112 },
-                middleLeft: { x: 272, y: 112 }, middle: { x: 272, y: 112 }, middleRight: { x: 272, y: 112 },
-                bottomLeft: { x: 272, y: 112 }, bottomMiddle: { x: 272, y: 112 }, bottomRight: { x: 272, y: 112 }
-              };
+        //       // Single consistent tile set - solid black tiles from tilemap
+        //       const tiles = {
+        //         topLeft: { x: 272, y: 112 }, topMiddle: { x: 272, y: 112 }, topRight: { x: 272, y: 112 },
+        //         middleLeft: { x: 272, y: 112 }, middle: { x: 272, y: 112 }, middleRight: { x: 272, y: 112 },
+        //         bottomLeft: { x: 272, y: 112 }, bottomMiddle: { x: 272, y: 112 }, bottomRight: { x: 272, y: 112 }
+        //       };
 
-              // Draw tiles to fill the platform area
-              const tilesX = Math.ceil(platform.width / tileSize);
-              const tilesY = Math.ceil(platform.height / tileSize);
+        //       // Draw tiles to fill the platform area
+        //       const tilesX = Math.ceil(platform.width / tileSize);
+        //       const tilesY = Math.ceil(platform.height / tileSize);
 
-              for (let tx = 0; tx < tilesX; tx++) {
-                for (let ty = 0; ty < tilesY; ty++) {
-                  const destX = screenX + (tx * tileSize);
-                  const destY = screenY + (ty * tileSize);
+        //       for (let tx = 0; tx < tilesX; tx++) {
+        //         for (let ty = 0; ty < tilesY; ty++) {
+        //           const destX = screenX + (tx * tileSize);
+        //           const destY = screenY + (ty * tileSize);
 
-                  // Choose tile based on position
-                  let selectedTile;
-                  const isTop = ty === 0;
-                  const isBottom = ty === tilesY - 1;
-                  const isLeft = tx === 0;
-                  const isRight = tx === tilesX - 1;
+        //           // Choose tile based on position
+        //           let selectedTile;
+        //           const isTop = ty === 0;
+        //           const isBottom = ty === tilesY - 1;
+        //           const isLeft = tx === 0;
+        //           const isRight = tx === tilesX - 1;
 
-                  if (isTop && isLeft) selectedTile = tiles.topLeft;
-                  else if (isTop && isRight) selectedTile = tiles.topRight;
-                  else if (isTop) selectedTile = tiles.topMiddle;
-                  else if (isBottom && isLeft) selectedTile = tiles.bottomLeft;
-                  else if (isBottom && isRight) selectedTile = tiles.bottomRight;
-                  else if (isBottom) selectedTile = tiles.bottomMiddle;
-                  else if (isLeft) selectedTile = tiles.middleLeft;
-                  else if (isRight) selectedTile = tiles.middleRight;
-                  else selectedTile = tiles.middle;
+        //           if (isTop && isLeft) selectedTile = tiles.topLeft;
+        //           else if (isTop && isRight) selectedTile = tiles.topRight;
+        //           else if (isTop) selectedTile = tiles.topMiddle;
+        //           else if (isBottom && isLeft) selectedTile = tiles.bottomLeft;
+        //           else if (isBottom && isRight) selectedTile = tiles.bottomRight;
+        //           else if (isBottom) selectedTile = tiles.bottomMiddle;
+        //           else if (isLeft) selectedTile = tiles.middleLeft;
+        //           else if (isRight) selectedTile = tiles.middleRight;
+        //           else selectedTile = tiles.middle;
 
-                  // Clip the tile if it extends beyond platform bounds
-                  const drawWidth = Math.min(tileSize, platform.width - (tx * tileSize));
-                  const drawHeight = Math.min(tileSize, platform.height - (ty * tileSize));
+        //           // Clip the tile if it extends beyond platform bounds
+        //           const drawWidth = Math.min(tileSize, platform.width - (tx * tileSize));
+        //           const drawHeight = Math.min(tileSize, platform.height - (ty * tileSize));
 
-                  ctx.drawImage(
-                    tilemapImage,
-                    selectedTile.x, selectedTile.y, drawWidth, drawHeight, // Source
-                    destX, destY, drawWidth, drawHeight // Destination
-                  );
-                }
-              }
-            } else {
-              // Fallback to green rectangle if tilemap isn't loaded yet
-              ctx.fillRect(screenX, screenY, platform.width, platform.height);
-            }
-          } else if (platform.type === 'triangle') {
-            // Draw triangle platform
-            const screenX1 = platform.x1 - currentCamera.x;
-            const screenY1 = platform.y1 - currentCamera.y;
-            const screenX2 = platform.x2 - currentCamera.x;
-            const screenY2 = platform.y2 - currentCamera.y;
-            const screenX3 = platform.x3 - currentCamera.x;
-            const screenY3 = platform.y3 - currentCamera.y;
+        //           ctx.drawImage(
+        //             tilemapImage,
+        //             selectedTile.x, selectedTile.y, drawWidth, drawHeight, // Source
+        //             destX, destY, drawWidth, drawHeight // Destination
+        //           );
+        //         }
+        //       }
+        //     } else {
+        //       // Fallback to green rectangle if tilemap isn't loaded yet
+        //       ctx.fillRect(screenX, screenY, platform.width, platform.height);
+        //     }
+        //   } else if (platform.type === 'triangle') {
+        //     // Draw triangle platform
+        //     const screenX1 = platform.x1 - currentCamera.x;
+        //     const screenY1 = platform.y1 - currentCamera.y;
+        //     const screenX2 = platform.x2 - currentCamera.x;
+        //     const screenY2 = platform.y2 - currentCamera.y;
+        //     const screenX3 = platform.x3 - currentCamera.x;
+        //     const screenY3 = platform.y3 - currentCamera.y;
 
-            ctx.beginPath();
-            ctx.moveTo(screenX1, screenY1);
-            ctx.lineTo(screenX2, screenY2);
-            ctx.lineTo(screenX3, screenY3);
-            ctx.closePath();
-            ctx.fill();
-          }
-        }
+        //     ctx.beginPath();
+        //     ctx.moveTo(screenX1, screenY1);
+        //     ctx.lineTo(screenX2, screenY2);
+        //     ctx.lineTo(screenX3, screenY3);
+        //     ctx.closePath();
+        //     ctx.fill();
+        //   }
+        // }
 
         // Draw black rectangle extending from left edge of screen to collision boundary, from top to bottom of screen
         ctx.fillStyle = '#000000';
@@ -1854,15 +1925,7 @@ const PongGame: React.FC = () => {
         if (platformerLoopRef.current) {
           cancelAnimationFrame(platformerLoopRef.current);
         }
-        // Stop both music tracks when component unmounts or restarts
-        if (backgroundMusicRef.current) {
-          backgroundMusicRef.current.pause();
-          backgroundMusicRef.current = null;
-        }
-        if (introMusicRef.current) {
-          introMusicRef.current.pause();
-          introMusicRef.current = null;
-        }
+        // Reset music state flags but keep music playing for menu transition
         musicStartedRef.current = false;
         introMusicStartedRef.current = false;
         autoRunStartedRef.current = false;
@@ -1893,22 +1956,6 @@ const PongGame: React.FC = () => {
 
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-black font-mono">
-        <div className="mb-4">
-          <button
-            onClick={() => {
-              soundRef.current?.menuClick();
-              if (platformerLoopRef.current) {
-                cancelAnimationFrame(platformerLoopRef.current);
-              }
-              onBack();
-            }}
-            onMouseEnter={() => soundRef.current?.menuHover()}
-            className="px-6 py-2 border-2 border-green-400 bg-black text-green-400 hover:bg-green-400 hover:text-black transition-colors duration-200 font-mono"
-          >
-            [ BACK TO MENU ]
-          </button>
-        </div>
-
         <div className="relative">
           <canvas
             ref={platformerCanvasRef}
@@ -1937,9 +1984,34 @@ const PongGame: React.FC = () => {
     );
   };
 
+  // Main menu fade-in state
+  const [menuFadeIn, setMenuFadeIn] = useState(false);
+  const [prevScreen, setPrevScreen] = useState<Screen>('menu');
+
+  useEffect(() => {
+    // Handle screen transitions for menu fade-in
+    if (prevScreen === 'menu' && currentScreen !== 'menu') {
+      // Leaving menu - reset fade state for next time
+      setMenuFadeIn(false);
+    } else if (currentScreen === 'menu' && prevScreen !== 'menu') {
+      // Entering menu - trigger fade-in immediately
+      setMenuFadeIn(true);
+    } else if (currentScreen === 'menu' && prevScreen === 'menu') {
+      // Already on menu (page reload) - trigger fade-in
+      setMenuFadeIn(true);
+    }
+
+    // Update previous screen
+    setPrevScreen(currentScreen);
+  }, [currentScreen, prevScreen]);
+
   // Render current screen
   if (currentScreen === 'menu') {
-    return <MainMenu />;
+    return (
+      <div className={`transition-opacity duration-1000 ${menuFadeIn ? 'opacity-100' : 'opacity-0'}`}>
+        <MainMenu />
+      </div>
+    );
   }
 
   if (currentScreen === 'online') {
@@ -1948,6 +2020,10 @@ const PongGame: React.FC = () => {
 
   if (currentScreen === 'settings') {
     return <PlaceholderScreen title="SETTINGS" onBack={() => setCurrentScreen('menu')} />;
+  }
+
+  if (currentScreen === 'more') {
+    return <MoreScreen />;
   }
 
   if (currentScreen === 'play') {
